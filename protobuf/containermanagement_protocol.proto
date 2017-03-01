@@ -17,46 +17,22 @@
  */
 
 /**
- * These .proto interfaces are private and stable.
+ * These .proto interfaces are public and stable.
  * Please see http://wiki.apache.org/hadoop/Compatibility
  * for what changes are allowed for a *stable* .proto interface.
  */
 
-option java_package = "org.apache.hadoop.security.proto";
-option java_outer_classname = "SecurityProtos";
+option java_package = "org.apache.hadoop.yarn.proto";
+option java_outer_classname = "ContainerManagementProtocol";
 option java_generic_services = true;
 option java_generate_equals_and_hash = true;
-package hadoop.common;
+option py_generic_services = true;
+package hadoop.yarn;
 
-/**
- * Security token identifier
- */
-message TokenProto {
-  required bytes identifier = 1;
-  required bytes password = 2;
-  required string kind = 3;
-  required string service = 4;
-}
+import "yarn_service_protos.proto";
 
-message GetDelegationTokenRequestProto {
-  required string renewer = 1;
-}
-
-message GetDelegationTokenResponseProto {
-  optional hadoop.common.TokenProto token = 1;
-}
-
-message RenewDelegationTokenRequestProto {
-  required hadoop.common.TokenProto token = 1;
-}
-
-message RenewDelegationTokenResponseProto {
-  required uint64 newExpiryTime = 1;
-}
-
-message CancelDelegationTokenRequestProto {
-  required hadoop.common.TokenProto token = 1;
-}
-
-message CancelDelegationTokenResponseProto { // void response
+service ContainerManagementProtocolService {
+  rpc startContainers(StartContainersRequestProto) returns (StartContainersResponseProto);
+  rpc stopContainers(StopContainersRequestProto) returns (StopContainersResponseProto);
+  rpc getContainerStatuses(GetContainerStatusesRequestProto) returns (GetContainerStatusesResponseProto);
 }

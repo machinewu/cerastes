@@ -23,15 +23,17 @@
  */
 
 option java_package = "org.apache.hadoop.yarn.proto";
-option java_outer_classname = "ContainerManagementProtocol";
+option java_outer_classname = "ApplicationMasterProtocol";
 option java_generic_services = true;
 option java_generate_equals_and_hash = true;
+option py_generic_services = true;
 package hadoop.yarn;
 
 import "yarn_service_protos.proto";
 
-service ContainerManagementProtocolService {
-  rpc startContainers(StartContainersRequestProto) returns (StartContainersResponseProto);
-  rpc stopContainers(StopContainersRequestProto) returns (StopContainersResponseProto);
-  rpc getContainerStatuses(GetContainerStatusesRequestProto) returns (GetContainerStatusesResponseProto);
+
+service ApplicationMasterProtocolService {
+  rpc registerApplicationMaster (RegisterApplicationMasterRequestProto) returns (RegisterApplicationMasterResponseProto);
+  rpc finishApplicationMaster (FinishApplicationMasterRequestProto) returns (FinishApplicationMasterResponseProto);
+  rpc allocate (AllocateRequestProto) returns (AllocateResponseProto);
 }
