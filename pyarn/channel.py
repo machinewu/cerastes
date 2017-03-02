@@ -47,7 +47,7 @@ from pyarn.protobuf.RpcHeader_pb2 import RpcRequestHeaderProto, RpcResponseHeade
 from pyarn.protobuf.IpcConnectionContext_pb2 import IpcConnectionContextProto
 from pyarn.protobuf.ProtobufRpcEngine_pb2 import RequestHeaderProto
 
-from pyarn.errors import YarnError
+from pyarn.errors import RpcError, RpcAuthenticationError, MalformedRpcRequestError, RpcSaslError, RpcBufferError 
 
 # Module imports
 
@@ -60,6 +60,7 @@ _kerberos_available = False
 try:
     from pyarn.rpc_sasl import SaslRpcClient
     from pyarn.kerberos import Kerberos
+    from krbV import Krb5Error
 except ImportError:
     _kerberos_available = False
 else:
@@ -136,7 +137,7 @@ class RpcBufferedReader(object):
         if len(bytes_read) < n:
             # we'd like to distinguish transient (e.g. network-related) problems
             # note: but this error could also be a logic error
-            raise YarnError("RpcBufferedReader only managed to read %s out of %s bytes" % (len(bytes_read), n))
+            raise RpcBufferError("RpcBufferedReader only managed to read %s out of %s bytes" % (len(bytes_read), n))
 
     def rewind(self, places):
         '''Rewinds the current buffer to a position. Needed for reading varints,
@@ -167,7 +168,7 @@ class SocketRpcChannel(RpcChannel):
 
     '''Socket implementation of an RpcChannel.
     '''
-    def __init__(self, host, port, version, context_protocol, effective_user=None, use_sasl=False, yarn_rm_principal=None,
+    def __init__(self, host, port, version, context_protocol, effective_user=None, use_sasl=False, krb_principal=None,
                  sock_connect_timeout=10000, sock_request_timeout=10000):
         '''SocketRpcChannel to connect to a socket server on a user defined port.
            It possible to define version and effective user for the communication.'''
@@ -178,14 +179,17 @@ class SocketRpcChannel(RpcChannel):
         self.version = version
         self.client_id = str(uuid.uuid4())
         self.use_sasl = use_sasl
-        self.yarn_rm_principal = yarn_rm_principal
+        self.krb_principal = krb_principal
         self.context_protocol=context_protocol
         if self.use_sasl:
             if not _kerberos_available:
-                raise YarnError("Kerberos libs not found.")
+                raise RpcError("Kerberos libs not found: pip install python-krbV sasl.")
 
             kerberos = Kerberos()
-            self.effective_user = effective_user or kerberos.user_principal().name
+            try:
+                self.effective_user = effective_user or kerberos.user_principal().name
+            except Krb5Error as ex:
+                raise RpcAuthenticationError("Failed kerberos authentication : %s" % str(ex)) 
         else: 
             self.effective_user = effective_user or pwd.getpwuid(os.getuid())[0]
         self.sock_connect_timeout = sock_connect_timeout
@@ -196,7 +200,7 @@ class SocketRpcChannel(RpcChannel):
 
         # Check the request is correctly initialized
         if not request.IsInitialized():
-            raise YarnError("Client request (%s) is missing mandatory fields" % type(request))
+            raise MalformedRpcRequestError("Client request (%s) is missing mandatory fields" % type(request))
 
     def get_connection(self, host, port):
         '''Open a socket connection to a given host and port and writes the Hadoop header
@@ -238,10 +242,10 @@ class SocketRpcChannel(RpcChannel):
             self.write(struct.pack('B', self.AUTH_PROTOCOL_NONE))   # serialization type (protobuf = 0)
 
         if self.use_sasl:
-            sasl = SaslRpcClient(self, yarn_rm_principal=self.yarn_rm_principal)
+            sasl = SaslRpcClient(self, krb_principal=self.krb_principal)
             sasl_connected = sasl.connect()
             if not sasl_connected:
-                raise YarnError("SASL is configured, but cannot get connected")
+                raise RpcSaslError("SASL is configured, but cannot get connected")
 
         rpc_header = self.create_rpc_request_header()
         context = self.create_connection_context()
@@ -408,7 +412,7 @@ class SocketRpcChannel(RpcChannel):
             self.handle_error(header)
 
     def handle_error(self, header):
-        raise YarnError("\n".join([header.exceptionClassName, header.errorMsg]))
+        raise RpcError("\n".join([header.exceptionClassName, header.errorMsg]))
 
     def close_socket(self):
         '''Closes the socket and resets the channel.'''
@@ -435,7 +439,7 @@ class SocketRpcChannel(RpcChannel):
 
             byte_stream = self.recv_rpc_message()
             return self.parse_response(byte_stream, response_class)
-        except YarnError:  # Raise a request error, but don't close the socket
+        except RpcError:  # Raise a request error, but don't close the socket
             raise
         except Exception:  # All other errors close the socket
             self.close_socket()

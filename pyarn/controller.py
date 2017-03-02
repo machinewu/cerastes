@@ -20,38 +20,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-from pyarn.channel import SocketRpcChannel
 import google.protobuf.service as service
-
-
-class RpcService(object):
-    def __init__(self, service_stub_class, port, host, hadoop_version, context_protocol, effective_user=None,
-                 use_sasl=False, yarn_rm_principal=None, sock_connect_timeout=10000,
-                 sock_request_timeout=10000):
-        self.service_stub_class = service_stub_class
-        self.port = port
-        self.host = host
-
-        # Setup the RPC channel
-        self.channel = SocketRpcChannel(host=self.host, port=self.port, version=hadoop_version,
-                                        context_protocol=context_protocol, effective_user=effective_user,
-                                        use_sasl=use_sasl, yarn_rm_principal=yarn_rm_principal,
-                                        sock_connect_timeout=sock_connect_timeout,
-                                        sock_request_timeout=sock_request_timeout,)
-        self.service = self.service_stub_class(self.channel)
-
-        # go through service_stub methods and add a wrapper function to
-        # this object that will call the method
-        for method in service_stub_class.GetDescriptor().methods:
-            # Add service methods to the this object
-            rpc = lambda request, service=self, method=method.name: service.call(service_stub_class.__dict__[method], request)
-
-            self.__dict__[method.name] = rpc
-
-    def call(self, method, request):
-        controller = SocketRpcController()
-        return method(self.service, controller, request)
-
 
 class SocketRpcController(service.RpcController):
     ''' RpcController implementation to be used by the SocketRpcChannel class.
