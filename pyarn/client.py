@@ -2,15 +2,20 @@
 
 import pyarn.protobuf.resourcemanager_administration_protocol_pb2 as rm_protocol
 import pyarn.protobuf.yarn_server_resourcemanager_service_protos_pb2 as yarn_rm_service_protos
+import pyarn.protobuf.applicationclient_protocol_pb2 as application_client_protocol
+import pyarn.protobuf.yarn_service_protos_pb2 as yarn_service_protos
+import pyarn.protobuf.yarn_protos_pb2 as yarn_protos
 
 from pyarn.errors import RpcError, YarnError, AuthorizationException, StandbyError 
 from pyarn.controller import SocketRpcController
 from pyarn.channel import SocketRpcChannel
 from pyarn.utils import SyncServicesList
 
-from google.protobuf import reflection
+from google.protobuf import reflection, json_format
 from six import add_metaclass
 from abc import ABCMeta, abstractmethod
+from enum import Enum, IntEnum
+from datetime import datetime
 
 import re
 import logging as lg
@@ -192,6 +197,7 @@ class YarnHAClient(YarnClient):
 class YarnRMAdminClient(YarnHAClient):
     """
       Yarn Resource Manager administration client.
+      Typically on port 8033.
     """
 
     rm_admin_proto = "org.apache.hadoop.yarn.server.api.ResourceManagerAdministrationProtocolPB"
@@ -262,5 +268,111 @@ class YarnRMAdminClient(YarnHAClient):
         response = self._getGroupsForUser(user=user)
         if response:
             return [ group for group in response.groups ]
+        else:
+            return []
+
+class YarnRMApplicationClient(YarnHAClient):
+    """
+      Yarn Resource Manager applications client.
+      Typically on port 8032.
+    """
+
+    class APPLICATION_STATES(IntEnum):
+        ACCEPTED = yarn_protos.ACCEPTED
+        NEW = yarn_protos.NEW
+        NEW_SAVING = yarn_protos.NEW_SAVING
+        SUBMITTED = yarn_protos.SUBMITTED
+        RUNNING = yarn_protos.RUNNING
+        FINISHED = yarn_protos.FINISHED
+        KILLED = yarn_protos.KILLED
+        FAILED = yarn_protos.FAILED
+
+    class APPLICATION_SCOPE(IntEnum):
+        ALL = yarn_service_protos.ALL
+        VIEWABLE = yarn_service_protos.VIEWABLE
+        OWN = yarn_service_protos.OWN
+
+    rm_app_proto = "org.apache.hadoop.yarn.api.ApplicationClientProtocolPB"
+    rm_app_service_stub = application_client_protocol.ApplicationClientProtocolService_Stub
+
+    _getApplications = _RpcHandler( rm_app_service_stub, rm_app_proto )
+
+    def get_protocol(self):
+        return self.rm_app_proto
+
+    def get_service_stub(self):
+        return self.rm_app_service_stub
+
+    def get_applications(self, application_types=None, application_states=None, users=None,
+                         queues=None, limit=None, start_begin=None, start_end=None,
+                         finish_begin=None, finish_end=None, applicationTags=None, scope=None):
+
+        if application_types:
+           if not type(application_types) in (tuple, list):
+              application_types = [application_types]
+
+        if users:
+           if not type(users) in (tuple, list):
+              users = [users]
+
+        if queues:
+           if not type(queues) in (tuple, list):
+              queues = [queues]
+
+        if start_begin:
+           if not isinstance(start_begin, datetime):
+              start_begin = int( (start_begin - datetime.utcfromtimestamp(0)).total_seconds() * 1000.0)
+           elif not isinstance(start_begin, int):
+              raise YarnError("only int and datetime are valid values for start_begin.")
+
+        if start_end:
+           if not isinstance(start_end, datetime):
+              start_end = int( (start_end - datetime.utcfromtimestamp(0)).total_seconds() * 1000.0)
+           elif not isinstance(start_end, int):
+              raise YarnError("only int and datetime are valid values for start_end.")
+
+        if finish_begin:
+           if not isinstance(finish_begin, datetime):
+              finish_begin = int( (finish_begin - datetime.utcfromtimestamp(0)).total_seconds() * 1000.0)
+           elif not isinstance(finish_begin, int):
+              raise YarnError("only int and datetime are valid values for finish_begin.")
+
+        if finish_end:
+           if not isinstance(finish_end, datetime):
+              finish_end = int( (finish_end - datetime.utcfromtimestamp(0)).total_seconds() * 1000.0)
+           elif not isinstance(finish_end, int):
+              raise YarnError("only int and datetime are valid values for finish_end.")
+
+        if applicationTags:
+           if not type(applicationTags) in (tuple, list):
+              applicationTags = [applicationTags]
+
+        if application_states:
+            if type(application_states) in (tuple, list):
+                for app_state in application_states:
+                   if not isinstance(app_state, self.APPLICATION_STATES):
+                      raise YarnError("application_states need to be a list of Enum APPLICATION_STATES.")
+            else:
+                if isinstance(application_states, self.APPLICATION_STATES):
+                    application_states = [application_states]
+                else:
+                    raise YarnError("application_states need to be a list of Enum APPLICATION_STATES.")
+
+        if scope:
+            if type(scope) in (tuple, list):
+                for s in scope:
+                    if not isinstance(s, self.APPLICATION_SCOPE):
+                        raise YarnError("scope need to be a list of Enum APPLICATION_SCOPE.")
+            else:
+                if isinstance(scope, self.APPLICATION_SCOPE):
+                    scope = [scope]
+                else:
+                    raise YarnError("scope need to be a list of Enum APPLICATION_SCOPE.")
+
+        response = self._getApplications( application_types=application_types, application_states=application_states,
+                                          users=users,queues=queues, limit=limit, start_begin=start_begin, start_end=start_end,
+                                          finish_begin=finish_begin, finish_end=finish_end, applicationTags=applicationTags, scope=scope)
+        if response:
+            return [ json_format.MessageToDict(application) for application in response.applications ]
         else:
             return []
