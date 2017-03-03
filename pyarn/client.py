@@ -36,13 +36,15 @@ class _RpcHandler(object):
         rpc_executor = self.service_stub_class.__dict__[self.method_desc.name]
         controller = SocketRpcController()
         req_class = reflection.MakeClass(self.method_desc.input_type)
-        request = req_class()
-        print params
+        print **params
+        request = req_class(**params)
+        '''        
         for key in params:
             try:
                 setattr(request, key, params[key])
             except AttributeError as ex:
                 raise YarnError("Assignment not allowed : no field %s in protocol message %s" % (key, method))
+        '''
         try:
             response = client._call(rpc_executor, controller, request)
             return response
@@ -125,6 +127,15 @@ class YarnRMAdminClient(YarnClient):
 
     _getGroupsForUser = _RpcHandler( rm_admin_service_stub, rm_admin_proto )
     _refreshServiceAcls = _RpcHandler( rm_admin_service_stub, rm_admin_proto )
+    _refreshAdminAcls = _RpcHandler( rm_admin_service_stub, rm_admin_proto )
+    _refreshNodes = _RpcHandler( rm_admin_service_stub, rm_admin_proto )
+    _refreshQueues = _RpcHandler( rm_admin_service_stub, rm_admin_proto )
+    _refreshSuperUserGroupsConfiguration = _RpcHandler( rm_admin_service_stub, rm_admin_proto )
+    _refreshUserToGroupsMappings = _RpcHandler( rm_admin_service_stub, rm_admin_proto )
+    _updateNodeResource = _RpcHandler( rm_admin_service_stub, rm_admin_proto )
+    _addToClusterNodeLabels = _RpcHandler( rm_admin_service_stub, rm_admin_proto )
+    _removeFromClusterNodeLabels = _RpcHandler( rm_admin_service_stub, rm_admin_proto )
+    _replaceLabelsOnNodes = _RpcHandler( rm_admin_service_stub, rm_admin_proto )
 
     def get_protocol(self):
         return self.rm_admin_proto
@@ -135,6 +146,42 @@ class YarnRMAdminClient(YarnClient):
     def refresh_service_acls(self):
         response = self._refreshServiceAcls()
         return True
+
+    def refresh_admin_acls(self):
+        response = self._refreshAdminAcls()
+        return True
+
+    def refresh_nodes(self):
+        response = self._refreshNodes()
+        return True
+
+    def refresh_queues(self):
+        response = self._refreshQueues()
+        return True
+
+    def refresh_super_user_groups_configuration(self):
+        response = self._refreshSuperUserGroupsConfiguration()
+        return True
+
+    def refresh_user_to_groups_mappings(self):
+        response = self._refreshUserToGroupsMappings()
+        return True
+
+    def update_node_resource(self, node_resource_map):
+        #TODO
+        return False
+
+    def add_to_cluster_node_labels(self, labels):
+        response = self._addToClusterNodeLabels(nodeLabels=labels)
+        return True
+
+    def remove_from_cluster_node_labels(self, labels):
+        response = self._removeFromClusterNodeLabels(nodeLabels=labels)
+        return True
+
+    def replace_labels_on_nodes(self, nodeToLabels):
+        #TODO
+        return False
 
     def get_groups_for_user(self, user):
         response = self._getGroupsForUser(user=user)
