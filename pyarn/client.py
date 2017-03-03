@@ -36,7 +36,7 @@ class _RpcHandler(object):
         rpc_executor = self.service_stub_class.__dict__[self.method_desc.name]
         controller = SocketRpcController()
         req_class = reflection.MakeClass(self.method_desc.input_type)
-        
+ 
         try:
             request = req_class(**params)
         except AttributeError as ex:
@@ -45,10 +45,14 @@ class _RpcHandler(object):
         '''
         request = req_class()
         for key in params:
-            try:
-                setattr(request, key, params[key])
-            except AttributeError as ex:
-                raise YarnError("Assignment not allowed : no field %s in protocol message %s" % (key, method))
+            # Assignment to repeated fields not allowed, need to extend
+            if isinstance(params[key], list):
+                getattr(request, key).extend(params[key])
+            else:
+                try:
+                    setattr(request, key, params[key])
+                except AttributeError as ex:
+                    raise YarnError("Error initializing Request class %s attribute %s : %s" % (req_class, key, str(ex)))
         '''
 
         try:

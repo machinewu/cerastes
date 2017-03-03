@@ -187,7 +187,10 @@ class SocketRpcChannel(RpcChannel):
 
             kerberos = Kerberos()
             try:
-                self.effective_user = effective_user or kerberos.user_principal().name
+                if effective_user is not None:
+                    self.effective_user = effective_user
+                else:
+                    self.effective_user = kerberos.user_principal().name
             except Krb5Error as ex:
                 raise RpcAuthenticationError("Failed kerberos authentication : %s" % str(ex)) 
         else: 
@@ -291,8 +294,7 @@ class SocketRpcChannel(RpcChannel):
     def create_connection_context(self):
         '''Creates and seriazlies a IpcConnectionContextProto (not delimited)'''
         context = IpcConnectionContextProto()
-        local_user = pwd.getpwuid(os.getuid())[0]
-        context.userInfo.effectiveUser = local_user
+        context.userInfo.effectiveUser = self.effective_user
         context.protocol = self.context_protocol
 
         s_context = context.SerializeToString()
