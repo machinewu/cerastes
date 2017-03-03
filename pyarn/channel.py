@@ -414,7 +414,7 @@ class SocketRpcChannel(RpcChannel):
             self.handle_error(header)
 
     def handle_error(self, header):
-        raise RpcError("\n".join([header.exceptionClassName, header.errorMsg]))
+        raise RpcError(header.exceptionClassName, header.errorMsg)
 
     def close_socket(self):
         '''Closes the socket and resets the channel.'''

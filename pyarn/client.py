@@ -60,12 +60,12 @@ class _RpcHandler(object):
             return response
         # parse the error message and return the corresponding exception
         except RpcError as e:
-            if "AuthorizationException" in str(e):
-                raise AuthorizationException("user not authorized to perform operation : %s" % str(e))
-            elif "StandbyException" in str(e):
-                raise StandbyError("resource manager host %s in standby mode : %s." % (client.host, str(e)))
+            if "AuthorizationException" in " ".join([e.class_name, e.message]) or "AccessControlException" in " ".join([e.class_name, e.message]):
+                raise AuthorizationException(str(e))
+            elif "StandbyException" in " ".join([e.class_name, e.message]):
+                raise StandbyError("ResourceManager %s in standby mode. %s." % (client.host, str(e)))
             else:
-                raise YarnError("Error running yarn method: %s" % str(e)) 
+                raise YarnError(str(e)) 
     
     return rpc_handler
 
