@@ -6,6 +6,7 @@ import pyarn.protobuf.yarn_server_resourcemanager_service_protos_pb2 as yarn_rm_
 from pyarn.errors import RpcError, YarnError, AuthorizationException, StandbyError 
 from pyarn.controller import SocketRpcController
 from pyarn.channel import SocketRpcChannel
+from pyarn.utils import SyncServicesList
 
 from google.protobuf import reflection
 from six import add_metaclass
@@ -63,7 +64,7 @@ class _RpcHandler(object):
             if "AuthorizationException" in " ".join([e.class_name, e.message]) or "AccessControlException" in " ".join([e.class_name, e.message]):
                 raise AuthorizationException(str(e))
             elif "StandbyException" in " ".join([e.class_name, e.message]):
-                raise StandbyError("ResourceManager %s in standby mode. %s." % (client.host, str(e)))
+                raise StandbyError(str(e))
             else:
                 raise YarnError(str(e)) 
     
@@ -126,7 +127,69 @@ class YarnClient(object):
         response =  executor(self.service, controller, request)
         return response
 
-class YarnRMAdminClient(YarnClient):
+class YarnHAClient(YarnClient):
+    """
+     Abstract Yarn HA Client. Extend this class if the service is conserned by HA.
+    """
+    def __init__(self, services, version=DEFAULT_YARN_PROTOCOL_VERSION, effective_user=None, use_sasl=False, yarn_rm_principal=None,
+                 sock_connect_timeout=10000, sock_request_timeout=10000):
+
+        if version < 9:
+            raise YarnError("Only protocol versions >= 9 supported")
+
+        self.services = services
+        self.sync_hosts_list = SyncServicesList(services)
+        self.version = version
+        self.effective_user = effective_user
+        self.use_sasl = use_sasl
+        self.yarn_rm_principal = yarn_rm_principal
+        self.sock_connect_timeout = sock_connect_timeout
+        self.sock_request_timeout = sock_request_timeout
+
+        self.service_cache = {}
+
+        self.current_service = self.services[0]
+        self.service = self.create_service_stub(services[0]['host'],services[0]['port'])
+        self.service_cache[services[0]['host']] = self.service
+
+    def create_service_stub(self, host, port):
+        # Setup the RPC channel
+        channel = SocketRpcChannel(host=host, port=port, version=self.version,
+                                   context_protocol=self.get_protocol(), effective_user=self.effective_user,
+                                   use_sasl=self.use_sasl, krb_principal=self.yarn_rm_principal,
+                                   sock_connect_timeout=self.sock_connect_timeout,
+                                   sock_request_timeout=self.sock_request_timeout)
+
+        return self.get_service_stub()(channel)
+    
+    # called on standby exception
+    def switch_active_service(self):
+        # find the next service
+        self.current_service = self.sync_hosts_list.switch_active_host(self.current_service)
+        if self.current_service['host'] in self.service_cache:
+            return self.service_cache[self.current_service['host']]
+        else:
+            self.service = self.create_service_stub(self.current_service['host'],self.current_service['port'])
+            self.service_cache[self.current_service['host']] = self.service
+
+    def _call(self, executor, controller, request):
+        max_attemps = self.sync_hosts_list.get_host_count()
+        attempt = 1
+        while attempt <= max_attemps:
+          try:
+            response =  executor(self.service, controller, request)
+            return response
+          except RpcError as e:
+            if "StandbyException" in " ".join([e.class_name, e.message]):
+                self.switch_active_service()
+                attempt += 1
+                pass
+            else:
+                raise e
+
+        raise StandbyError('Could not find any active host.')
+
+class YarnRMAdminClient(YarnHAClient):
     """
       Yarn Resource Manager administration client.
     """
