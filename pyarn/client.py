@@ -36,15 +36,21 @@ class _RpcHandler(object):
         rpc_executor = self.service_stub_class.__dict__[self.method_desc.name]
         controller = SocketRpcController()
         req_class = reflection.MakeClass(self.method_desc.input_type)
-        print **params
-        request = req_class(**params)
-        '''        
+        
+        try:
+            request = req_class(**params)
+        except AttributeError as ex:
+            raise YarnError("Error creating Request class %s : %s" % (req_class, str(ex)))
+
+        '''
+        request = req_class()
         for key in params:
             try:
                 setattr(request, key, params[key])
             except AttributeError as ex:
                 raise YarnError("Assignment not allowed : no field %s in protocol message %s" % (key, method))
         '''
+
         try:
             response = client._call(rpc_executor, controller, request)
             return response
@@ -67,7 +73,6 @@ class _ClientType(ABCMeta):
     for key, value in attrs.items():
       if isinstance(value, _RpcHandler):
         attrs[key] = value.get_handler(mcs.pattern.sub('', key))
-        #print "%s , %s -> %s" % (key, attrs[key],mcs.pattern.sub('', key).upper())
     client = super(_ClientType, mcs).__new__(mcs, name, bases, attrs)
     return client
 
@@ -171,8 +176,11 @@ class YarnRMAdminClient(YarnClient):
         #TODO
         return False
 
-    def add_to_cluster_node_labels(self, labels):
-        response = self._addToClusterNodeLabels(nodeLabels=labels)
+    def add_to_cluster_node_labels(self, nodeLabels):
+        if not isinstance(nodeLabels, list):
+           raise YarnError("Add To Cluster Node Labels expect array of strings argument")
+
+        response = self._addToClusterNodeLabels(nodeLabels=nodeLabels)
         return True
 
     def remove_from_cluster_node_labels(self, labels):
