@@ -5,6 +5,8 @@ import pyarn.protobuf.yarn_server_resourcemanager_service_protos_pb2 as yarn_rm_
 import pyarn.protobuf.applicationclient_protocol_pb2 as application_client_protocol
 import pyarn.protobuf.yarn_service_protos_pb2 as yarn_service_protos
 import pyarn.protobuf.yarn_protos_pb2 as yarn_protos
+import pyarn.protobuf.HAServiceProtocol_pb2 as ha_protocol
+import pyarn.protobuf.ZKFCProtocol_pb2 as zkfc_protocol
 
 from pyarn.errors import RpcError, YarnError, AuthorizationException, StandbyError 
 from pyarn.controller import SocketRpcController
@@ -90,7 +92,8 @@ class _ClientType(ABCMeta):
 @add_metaclass(_ClientType)
 class YarnClient(object):
     """
-     Abstract Yarn Client.
+     Abstract Yarn Client. A Client is defined by a service endpoint, not by a physical service, which means
+     if a service implements multiple endpoints, each one will be handled by a separate client.
     """
 
     def __init__(self, host, port, version=DEFAULT_YARN_PROTOCOL_VERSION, effective_user=None, use_sasl=False, yarn_rm_principal=None,
@@ -111,31 +114,25 @@ class YarnClient(object):
 
         # Setup the RPC channel
         self.channel = SocketRpcChannel(host=self.host, port=self.port, version=version,
-                                        context_protocol=self.get_protocol(), effective_user=effective_user,
+                                        context_protocol=self.service_protocol, effective_user=effective_user,
                                         use_sasl=use_sasl, krb_principal=yarn_rm_principal,
                                         sock_connect_timeout=sock_connect_timeout,
                                         sock_request_timeout=sock_request_timeout)
 
-        self.service = self.get_service_stub()(self.channel)
+        self.service = self.service_stub(self.channel)
 
         log.debug("Created client for %s:%s", host, port)
 
-    @abstractmethod
-    def get_protocol(self):
-        return
-
-    @abstractmethod
-    def get_service_stub(self):
-        return
-   
     def _call(self, executor, controller, request):
         response =  executor(self.service, controller, request)
         return response
 
-class YarnHAClient(YarnClient):
+class YarnFailoverClient(YarnClient):
     """
-     Abstract Yarn HA Client. Extend this class if the service is conserned by HA.
+     Abstract Yarn Failover Client. This client attempts requests to a service until a standby error is
+     received then switch to the second service.
     """
+
     def __init__(self, services, version=DEFAULT_YARN_PROTOCOL_VERSION, effective_user=None, use_sasl=False, yarn_rm_principal=None,
                  sock_connect_timeout=10000, sock_request_timeout=10000):
 
@@ -160,12 +157,12 @@ class YarnHAClient(YarnClient):
     def create_service_stub(self, host, port):
         # Setup the RPC channel
         channel = SocketRpcChannel(host=host, port=port, version=self.version,
-                                   context_protocol=self.get_protocol(), effective_user=self.effective_user,
+                                   context_protocol=self.service_protocol, effective_user=self.effective_user,
                                    use_sasl=self.use_sasl, krb_principal=self.yarn_rm_principal,
                                    sock_connect_timeout=self.sock_connect_timeout,
                                    sock_request_timeout=self.sock_request_timeout)
 
-        return self.get_service_stub()(channel)
+        return self.service_stub(channel)
     
     # called on standby exception
     def switch_active_service(self):
@@ -194,32 +191,26 @@ class YarnHAClient(YarnClient):
 
         raise StandbyError('Could not find any active host.')
 
-class YarnRMAdminClient(YarnHAClient):
+class YarnAdminClient(YarnClient):
     """
       Yarn Resource Manager administration client.
       Typically on port 8033.
     """
 
-    rm_admin_proto = "org.apache.hadoop.yarn.server.api.ResourceManagerAdministrationProtocolPB"
-    rm_admin_service_stub = rm_protocol.ResourceManagerAdministrationProtocolService_Stub
+    service_protocol = "org.apache.hadoop.yarn.server.api.ResourceManagerAdministrationProtocolPB"
+    service_stub = rm_protocol.ResourceManagerAdministrationProtocolService_Stub
 
-    _getGroupsForUser = _RpcHandler( rm_admin_service_stub, rm_admin_proto )
-    _refreshServiceAcls = _RpcHandler( rm_admin_service_stub, rm_admin_proto )
-    _refreshAdminAcls = _RpcHandler( rm_admin_service_stub, rm_admin_proto )
-    _refreshNodes = _RpcHandler( rm_admin_service_stub, rm_admin_proto )
-    _refreshQueues = _RpcHandler( rm_admin_service_stub, rm_admin_proto )
-    _refreshSuperUserGroupsConfiguration = _RpcHandler( rm_admin_service_stub, rm_admin_proto )
-    _refreshUserToGroupsMappings = _RpcHandler( rm_admin_service_stub, rm_admin_proto )
-    _updateNodeResource = _RpcHandler( rm_admin_service_stub, rm_admin_proto )
-    _addToClusterNodeLabels = _RpcHandler( rm_admin_service_stub, rm_admin_proto )
-    _removeFromClusterNodeLabels = _RpcHandler( rm_admin_service_stub, rm_admin_proto )
-    _replaceLabelsOnNodes = _RpcHandler( rm_admin_service_stub, rm_admin_proto )
-
-    def get_protocol(self):
-        return self.rm_admin_proto
-
-    def get_service_stub(self):
-        return self.rm_admin_service_stub
+    _getGroupsForUser = _RpcHandler( service_stub, service_protocol )
+    _refreshServiceAcls = _RpcHandler( service_stub, service_protocol )
+    _refreshAdminAcls = _RpcHandler( service_stub, service_protocol )
+    _refreshNodes = _RpcHandler( service_stub, service_protocol )
+    _refreshQueues = _RpcHandler( service_stub, service_protocol )
+    _refreshSuperUserGroupsConfiguration = _RpcHandler( service_stub, service_protocol )
+    _refreshUserToGroupsMappings = _RpcHandler( service_stub, service_protocol )
+    _updateNodeResource = _RpcHandler( service_stub, service_protocol )
+    _addToClusterNodeLabels = _RpcHandler( service_stub, service_protocol )
+    _removeFromClusterNodeLabels = _RpcHandler( service_stub, service_protocol )
+    _replaceLabelsOnNodes = _RpcHandler( service_stub, service_protocol )
 
     def refresh_service_acls(self):
         response = self._refreshServiceAcls()
@@ -271,7 +262,233 @@ class YarnRMAdminClient(YarnHAClient):
         else:
             return []
 
-class YarnRMApplicationClient(YarnHAClient):
+class YarnHARMClient(YarnClient):
+
+    service_protocol = "org.apache.hadoop.ha.HAServiceProtocol"
+    service_stub = ha_protocol.HAServiceProtocolService_Stub
+
+    _getServiceStatus = _RpcHandler( service_stub, service_protocol )
+    _monitorHealth = _RpcHandler( service_stub, service_protocol ) 
+    _transitionToStandby = _RpcHandler( service_stub, service_protocol )
+    _transitionToActive = _RpcHandler( service_stub, service_protocol )
+
+    class REQUEST_SOURCE(IntEnum):
+        REQUEST_BY_USER = ha_protocol.REQUEST_BY_USER
+        REQUEST_BY_USER_FORCED = ha_protocol.REQUEST_BY_USER_FORCED
+        REQUEST_BY_ZKFC = ha_protocol.REQUEST_BY_ZKFC
+
+    def get_service_status(self):
+        response = self._getServiceStatus()
+        if response:
+            return json_format.MessageToDict(response)
+        else:
+            return []
+
+    def monitor_health(self):
+       # raise an error if there is something wrong
+       response = self._monitorHealth()
+       return True
+
+    def transition_to_standby(self, source):
+       if not isinstance(source, self.REQUEST_SOURCE):
+           raise YarnError("scope need to be REQUEST_SOURCE type.")
+
+       reqInfo = HAStateChangeRequestInfoProto(reqSource=source)
+       response = self._transitionToStandby(reqInfo=reqInfo)
+       return True
+
+    def transition_to_active(self, source):
+       if not isinstance(source, self.REQUEST_SOURCE):
+           raise YarnError("scope need to be REQUEST_SOURCE type.")
+
+       reqInfo = HAStateChangeRequestInfoProto(reqSource=source)
+       response = self._transitionToActive()
+       return True
+
+class YarnZKFCClient(YarnClient):
+
+    #service_protocol = "org.apache.hadoop.ha.ZKFCProtocol"
+    service_protocol = "org.apache.hadoop.ha.ZKFCProtocol"
+    service_stub = zkfc_protocol.ZKFCProtocolService_Stub
+
+    _gracefulFailover = _RpcHandler( service_stub, service_protocol )
+    _cedeActive = _RpcHandler( service_stub, service_protocol )
+
+
+    def graceful_failover(self):
+       '''
+         Request that this node try to become active through a graceful failover.
+
+         If the node is already active, this is a no-op and simply returns success
+         without taking any further action. 
+         If the node is not healthy, it will throw an exception indicating that it
+         is not able to become active.
+         If the node is healthy and not active, it will try to initiate a graceful
+         failover to become active, returning only when it has successfully become
+         active.
+         If the node fails to successfully coordinate the failover, throws an
+         exception indicating the reason for failure.
+       '''
+       response = self._gracefulFailover()
+       return True 
+
+    def cede_active(self, millisToCede):
+       ''' Request that this service yield from the active node election for the
+           specified time period.
+
+        :param millisToCede: period for which the node should not attempt to
+                             become active.
+        
+        If the node is not currently active, it simply prevents any attempts
+        to become active for the specified time period. Otherwise, it first
+        tries to transition the local service to standby state, and then quits
+        the election.        
+        If the attempt to transition to standby succeeds, then the ZKFC receiving
+        this RPC will delete its own breadcrumb node in ZooKeeper. Thus, the
+        next node to become active will not run any fencing process. Otherwise,
+        the breadcrumb will be left, such that the next active will fence this
+        node.
+        After the specified time period elapses, the node will attempt to re-join
+        the election, provided that its service is healthy.
+        If the node has previously been instructed to cede active, and is still
+        within the specified time period, the later command's time period will
+        take precedence, resetting the timer.
+        A call to cedeActive which specifies a 0 or negative time period will
+        allow the target node to immediately rejoin the election, so long as
+        it is healthy.
+       '''
+       if not isinstance(millisToCede, int):
+           raise YarnError("millisToCede should be of type int.")
+       response = self._cedeActive(millisToCede=millisToCede)
+       return True
+
+class YarnAdminHAClient(YarnAdminClient):
+    """
+      Yarn Resource Manager HA Administration client.
+    """
+    def __init__(self, services, version=DEFAULT_YARN_PROTOCOL_VERSION, effective_user=None, use_sasl=False, yarn_rm_principal=None,
+                 sock_connect_timeout=10000, sock_request_timeout=10000):
+
+        if version < 9:
+            raise YarnError("Only protocol versions >= 9 supported")
+
+        if not isinstance(services, list):
+            raise YarnError("Yarn RM Admin Client is valid only when HA is active, services need to be a list of  rm host and port dicts")
+        elif len(services) != 2:
+            raise YarnError("Yarn RM Admin Client is valid only when HA is active, services need to be a list of two rm host and port dicts")
+
+        self.rm_one_admin_client = YarnAdminClient( host=services[0]['host'], port=services[0]['port'], version=version,
+                                                    effective_user=effective_user,
+                                                    use_sasl=use_sasl, yarn_rm_principal=yarn_rm_principal,
+                                                    sock_connect_timeout=sock_connect_timeout,
+                                                    sock_request_timeout=sock_request_timeout)
+
+        self.rm_two_admin_client = YarnAdminClient( host=services[1]['host'], port=services[1]['port'], version=version,
+                                                    effective_user=effective_user,
+                                                    use_sasl=use_sasl, yarn_rm_principal=yarn_rm_principal,
+                                                    sock_connect_timeout=sock_connect_timeout,
+                                                    sock_request_timeout=sock_request_timeout)
+
+        self.rm_one_zk_client = YarnZKFCClient( host=services[0]['host'], port=services[0]['port'], version=version,
+                                                effective_user=effective_user,
+                                                use_sasl=use_sasl, yarn_rm_principal=yarn_rm_principal,
+                                                sock_connect_timeout=sock_connect_timeout,
+                                                sock_request_timeout=sock_request_timeout)
+
+        self.rm_two_zk_client = YarnZKFCClient( host=services[1]['host'], port=services[1]['port'], version=version,
+                                                effective_user=effective_user,
+                                                use_sasl=use_sasl, yarn_rm_principal=yarn_rm_principal,
+                                                sock_connect_timeout=sock_connect_timeout,
+                                                sock_request_timeout=sock_request_timeout)
+
+
+        self.rm_one_ha_client = YarnHARMClient( host=services[0]['host'], port=services[0]['port'], version=version,
+                                                effective_user=effective_user,
+                                                use_sasl=use_sasl, yarn_rm_principal=yarn_rm_principal,
+                                                sock_connect_timeout=sock_connect_timeout,
+                                                sock_request_timeout=sock_request_timeout)
+
+        self.rm_two_ha_client = YarnHARMClient( host=services[1]['host'], port=services[1]['port'], version=version,
+                                                effective_user=effective_user,
+                                                use_sasl=use_sasl, yarn_rm_principal=yarn_rm_principal,
+                                                sock_connect_timeout=sock_connect_timeout,
+                                                sock_request_timeout=sock_request_timeout)
+
+        self.services_map = [
+                             {
+                               'host': services[0]['host'],
+                               'port': services[0]['port'],
+                               'client': self.rm_one_admin_client,
+                               'ha_client': self.rm_one_ha_client,
+                               'zk_client': self.rm_one_zk_client
+                             },
+                             {
+                               'host': services[1]['host'],
+                               'port': services[1]['port'],
+                               'client': self.rm_two_admin_client,
+                               'ha_client': self.rm_two_ha_client,
+                               'zk_client': self.rm_two_zk_client
+                             }
+                            ]
+
+    def get_active_rm_service(self):
+        for svr in self.services_map:
+           if svr['ha_client'].get_service_status()['state'] == "ACTIVE":
+              return svr
+        raise YarnError("Could not find any active RM server.")
+
+    def get_active_rm_host(self):
+        return self.get_active_rm_service()['host']
+
+    def get_active_rm_client(self):
+        return self.get_active_rm_service()['client']
+
+    def get_active_ha_handler(self):
+        return self.get_active_rm_service()['ha_client']
+
+    def get_active_zk_failover_controller(self):
+        return self.get_active_rm_service()['zk_client']
+
+    def get_standby_rm_service(self):
+        for svr in self.services_map:
+           if svr['ha_client'].get_service_status()['state'] == "STANDBY":
+              return svr
+        raise YarnError("Could not find any active RM server.")
+
+    def get_standby_rm_host(self):
+        return self.get_standby_rm_service()['host']
+
+    def get_standby_rm_client(self):
+        return self.get_standby_rm_service()['client']
+
+    def get_standby_ha_handler(self):
+        return self.get_standby_rm_service()['ha_client']
+
+    def get_standby_zk_failover_controller(self):
+        return self.get_standby_rm_service()['zk_client']
+
+    def graceful_failover(self):
+        sb_zk_client = self.get_standby_rm_service()['zk_client']
+        sb_zk_client.graceful_failover()
+        return True
+
+    def explicit_failover(self,force=False):
+        ha_sb_client = self.get_standby_rm_service()['ha_client']
+        ha_active_client = self.get_active_rm_service()['ha_client']
+        if force:
+           state = YarnHARMClient.REQUEST_SOURCE.REQUEST_BY_USER_FORCED
+        else:
+           state = YarnHARMClient.REQUEST_SOURCE.REQUEST_BY_USER
+        ha_active_client.transition_to_standby(state)
+        ha_sb_client.transition_to_active(state)
+        return True
+
+    def _call(self, executor, controller, request):
+        active_client = self.get_active_rm_client()
+        response =  executor(active_client.service, controller, request)
+        return response
+
+class YarnRMApplicationClient(YarnFailoverClient):
     """
       Yarn Resource Manager applications client.
       Typically on port 8032.
@@ -292,16 +509,10 @@ class YarnRMApplicationClient(YarnHAClient):
         VIEWABLE = yarn_service_protos.VIEWABLE
         OWN = yarn_service_protos.OWN
 
-    rm_app_proto = "org.apache.hadoop.yarn.api.ApplicationClientProtocolPB"
-    rm_app_service_stub = application_client_protocol.ApplicationClientProtocolService_Stub
+    service_protocol = "org.apache.hadoop.yarn.api.ApplicationClientProtocolPB"
+    service_stub = application_client_protocol.ApplicationClientProtocolService_Stub
 
-    _getApplications = _RpcHandler( rm_app_service_stub, rm_app_proto )
-
-    def get_protocol(self):
-        return self.rm_app_proto
-
-    def get_service_stub(self):
-        return self.rm_app_service_stub
+    _getApplications = _RpcHandler( service_stub, service_protocol )
 
     def get_applications(self, application_types=None, application_states=None, users=None,
                          queues=None, limit=None, start_begin=None, start_end=None,
