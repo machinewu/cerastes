@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.abspath('src'))
 
 def _get_version():
   """Extract version from package."""
-  with open('pyarn/__init__.py') as reader:
+  with open('cerastes/__init__.py') as reader:
     match = re.search(
       r'^__version__\s*=\s*[\'"]([^\'"]*)[\'"]',
       reader.read(),
@@ -26,13 +26,13 @@ def _get_long_description():
     return reader.read()
 
 setup(
-  name='pyarn',
+  name='cerastes',
   version=_get_version(),
   description=__doc__,
   long_description=_get_long_description(),
   author='Yassine Azzouz',
   author_email='yassine.azzouz@agmail.com',
-  url='https://github.com/yassineazzouz/pyarn',
+  url='https://github.com/yassineazzouz/cerastes',
   license='MIT',
   packages=find_packages(),
   package_data={'': ['*.proto','*.json']},

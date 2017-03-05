@@ -1,16 +1,16 @@
 #!/usr/bin/python
 
-import pyarn.protobuf.resourcemanager_administration_protocol_pb2 as rm_protocol
-import pyarn.protobuf.yarn_server_resourcemanager_service_protos_pb2 as yarn_rm_service_protos
-import pyarn.protobuf.applicationclient_protocol_pb2 as application_client_protocol
-import pyarn.protobuf.yarn_service_protos_pb2 as yarn_service_protos
-import pyarn.protobuf.yarn_protos_pb2 as yarn_protos
-import pyarn.protobuf.HAServiceProtocol_pb2 as ha_protocol
+import cerastes.protobuf.resourcemanager_administration_protocol_pb2 as rm_protocol
+import cerastes.protobuf.yarn_server_resourcemanager_service_protos_pb2 as yarn_rm_service_protos
+import cerastes.protobuf.applicationclient_protocol_pb2 as application_client_protocol
+import cerastes.protobuf.yarn_service_protos_pb2 as yarn_service_protos
+import cerastes.protobuf.yarn_protos_pb2 as yarn_protos
+import cerastes.protobuf.HAServiceProtocol_pb2 as ha_protocol
 
-from pyarn.errors import RpcError, YarnError, AuthorizationException, StandbyError 
-from pyarn.controller import SocketRpcController
-from pyarn.channel import SocketRpcChannel
-from pyarn.utils import SyncServicesList
+from cerastes.errors import RpcError, YarnError, AuthorizationException, StandbyError 
+from cerastes.controller import SocketRpcController
+from cerastes.channel import SocketRpcChannel
+from cerastes.utils import SyncServicesList
 
 from google.protobuf import reflection, json_format
 from six import add_metaclass

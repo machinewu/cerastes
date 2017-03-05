@@ -43,11 +43,11 @@ import google.protobuf.internal.encoder as encoder
 import google.protobuf.internal.decoder as decoder
 
 # Protobuf imports
-from pyarn.protobuf.RpcHeader_pb2 import RpcRequestHeaderProto, RpcResponseHeaderProto
-from pyarn.protobuf.IpcConnectionContext_pb2 import IpcConnectionContextProto
-from pyarn.protobuf.ProtobufRpcEngine_pb2 import RequestHeaderProto
+from cerastes.protobuf.RpcHeader_pb2 import RpcRequestHeaderProto, RpcResponseHeaderProto
+from cerastes.protobuf.IpcConnectionContext_pb2 import IpcConnectionContextProto
+from cerastes.protobuf.ProtobufRpcEngine_pb2 import RequestHeaderProto
 
-from pyarn.errors import RpcError, RpcAuthenticationError, MalformedRpcRequestError, RpcSaslError, RpcBufferError 
+from cerastes.errors import RpcError, RpcAuthenticationError, MalformedRpcRequestError, RpcSaslError, RpcBufferError 
 
 # Module imports
 
@@ -58,8 +58,8 @@ import uuid
 
 _kerberos_available = False
 try:
-    from pyarn.rpc_sasl import SaslRpcClient
-    from pyarn.kerberos import Kerberos
+    from cerastes.rpc_sasl import SaslRpcClient
+    from cerastes.kerberos import Kerberos
     from krbV import Krb5Error
 except ImportError:
     _kerberos_available = False

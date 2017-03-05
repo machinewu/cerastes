@@ -34,7 +34,7 @@ import struct
 import sasl
 import re
 
-from pyarn.protobuf.RpcHeader_pb2 import RpcRequestHeaderProto, RpcResponseHeaderProto, RpcSaslProto
+from cerastes.protobuf.RpcHeader_pb2 import RpcRequestHeaderProto, RpcResponseHeaderProto, RpcSaslProto
 
 import google.protobuf.internal.encoder as encoder
 
