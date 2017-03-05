@@ -6,7 +6,6 @@ import pyarn.protobuf.applicationclient_protocol_pb2 as application_client_proto
 import pyarn.protobuf.yarn_service_protos_pb2 as yarn_service_protos
 import pyarn.protobuf.yarn_protos_pb2 as yarn_protos
 import pyarn.protobuf.HAServiceProtocol_pb2 as ha_protocol
-import pyarn.protobuf.ZKFCProtocol_pb2 as zkfc_protocol
 
 from pyarn.errors import RpcError, YarnError, AuthorizationException, StandbyError 
 from pyarn.controller import SocketRpcController
@@ -293,7 +292,7 @@ class YarnHARMClient(YarnClient):
        if not isinstance(source, self.REQUEST_SOURCE):
            raise YarnError("scope need to be REQUEST_SOURCE type.")
 
-       reqInfo = HAStateChangeRequestInfoProto(reqSource=source)
+       reqInfo = ha_protocol.HAStateChangeRequestInfoProto(reqSource=source)
        response = self._transitionToStandby(reqInfo=reqInfo)
        return True
 
@@ -301,65 +300,8 @@ class YarnHARMClient(YarnClient):
        if not isinstance(source, self.REQUEST_SOURCE):
            raise YarnError("scope need to be REQUEST_SOURCE type.")
 
-       reqInfo = HAStateChangeRequestInfoProto(reqSource=source)
-       response = self._transitionToActive()
-       return True
-
-class YarnZKFCClient(YarnClient):
-
-    #service_protocol = "org.apache.hadoop.ha.ZKFCProtocol"
-    service_protocol = "org.apache.hadoop.ha.ZKFCProtocol"
-    service_stub = zkfc_protocol.ZKFCProtocolService_Stub
-
-    _gracefulFailover = _RpcHandler( service_stub, service_protocol )
-    _cedeActive = _RpcHandler( service_stub, service_protocol )
-
-
-    def graceful_failover(self):
-       '''
-         Request that this node try to become active through a graceful failover.
-
-         If the node is already active, this is a no-op and simply returns success
-         without taking any further action. 
-         If the node is not healthy, it will throw an exception indicating that it
-         is not able to become active.
-         If the node is healthy and not active, it will try to initiate a graceful
-         failover to become active, returning only when it has successfully become
-         active.
-         If the node fails to successfully coordinate the failover, throws an
-         exception indicating the reason for failure.
-       '''
-       response = self._gracefulFailover()
-       return True 
-
-    def cede_active(self, millisToCede):
-       ''' Request that this service yield from the active node election for the
-           specified time period.
-
-        :param millisToCede: period for which the node should not attempt to
-                             become active.
-        
-        If the node is not currently active, it simply prevents any attempts
-        to become active for the specified time period. Otherwise, it first
-        tries to transition the local service to standby state, and then quits
-        the election.        
-        If the attempt to transition to standby succeeds, then the ZKFC receiving
-        this RPC will delete its own breadcrumb node in ZooKeeper. Thus, the
-        next node to become active will not run any fencing process. Otherwise,
-        the breadcrumb will be left, such that the next active will fence this
-        node.
-        After the specified time period elapses, the node will attempt to re-join
-        the election, provided that its service is healthy.
-        If the node has previously been instructed to cede active, and is still
-        within the specified time period, the later command's time period will
-        take precedence, resetting the timer.
-        A call to cedeActive which specifies a 0 or negative time period will
-        allow the target node to immediately rejoin the election, so long as
-        it is healthy.
-       '''
-       if not isinstance(millisToCede, int):
-           raise YarnError("millisToCede should be of type int.")
-       response = self._cedeActive(millisToCede=millisToCede)
+       reqInfo = ha_protocol.HAStateChangeRequestInfoProto(reqSource=source)
+       response = self._transitionToActive(reqInfo=reqInfo)
        return True
 
 class YarnAdminHAClient(YarnAdminClient):
@@ -389,19 +331,6 @@ class YarnAdminHAClient(YarnAdminClient):
                                                     sock_connect_timeout=sock_connect_timeout,
                                                     sock_request_timeout=sock_request_timeout)
 
-        self.rm_one_zk_client = YarnZKFCClient( host=services[0]['host'], port=services[0]['port'], version=version,
-                                                effective_user=effective_user,
-                                                use_sasl=use_sasl, yarn_rm_principal=yarn_rm_principal,
-                                                sock_connect_timeout=sock_connect_timeout,
-                                                sock_request_timeout=sock_request_timeout)
-
-        self.rm_two_zk_client = YarnZKFCClient( host=services[1]['host'], port=services[1]['port'], version=version,
-                                                effective_user=effective_user,
-                                                use_sasl=use_sasl, yarn_rm_principal=yarn_rm_principal,
-                                                sock_connect_timeout=sock_connect_timeout,
-                                                sock_request_timeout=sock_request_timeout)
-
-
         self.rm_one_ha_client = YarnHARMClient( host=services[0]['host'], port=services[0]['port'], version=version,
                                                 effective_user=effective_user,
                                                 use_sasl=use_sasl, yarn_rm_principal=yarn_rm_principal,
@@ -419,15 +348,13 @@ class YarnAdminHAClient(YarnAdminClient):
                                'host': services[0]['host'],
                                'port': services[0]['port'],
                                'client': self.rm_one_admin_client,
-                               'ha_client': self.rm_one_ha_client,
-                               'zk_client': self.rm_one_zk_client
+                               'ha_client': self.rm_one_ha_client
                              },
                              {
                                'host': services[1]['host'],
                                'port': services[1]['port'],
                                'client': self.rm_two_admin_client,
-                               'ha_client': self.rm_two_ha_client,
-                               'zk_client': self.rm_two_zk_client
+                               'ha_client': self.rm_two_ha_client
                              }
                             ]
 
@@ -446,9 +373,6 @@ class YarnAdminHAClient(YarnAdminClient):
     def get_active_ha_handler(self):
         return self.get_active_rm_service()['ha_client']
 
-    def get_active_zk_failover_controller(self):
-        return self.get_active_rm_service()['zk_client']
-
     def get_standby_rm_service(self):
         for svr in self.services_map:
            if svr['ha_client'].get_service_status()['state'] == "STANDBY":
@@ -463,14 +387,6 @@ class YarnAdminHAClient(YarnAdminClient):
 
     def get_standby_ha_handler(self):
         return self.get_standby_rm_service()['ha_client']
-
-    def get_standby_zk_failover_controller(self):
-        return self.get_standby_rm_service()['zk_client']
-
-    def graceful_failover(self):
-        sb_zk_client = self.get_standby_rm_service()['zk_client']
-        sb_zk_client.graceful_failover()
-        return True
 
     def explicit_failover(self,force=False):
         ha_sb_client = self.get_standby_rm_service()['ha_client']
