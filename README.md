@@ -1,3 +1,5 @@
+[![pypi](https://badge.fury.io/py/cerastes.svg)](https://badge.fury.io/py/cerastes)
+
 Cerastes
 ==================================
 
