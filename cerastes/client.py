@@ -425,10 +425,161 @@ class YarnRMApplicationClient(YarnFailoverClient):
         VIEWABLE = yarn_service_protos.VIEWABLE
         OWN = yarn_service_protos.OWN
 
+    class LOCAL_RESOURCE_TYPE(IntEnum):
+        ARCHIVE = yarn_service_protos.ARCHIVE
+        FILE = yarn_service_protos.FILE
+        PATTERN = yarn_service_protos.PATTERN
+
+    class LOCAL_RESOURCE_VISIBILITY(IntEnum):
+        PUBLIC = yarn_service_protos.PUBLIC
+        PRIVATE = yarn_service_protos.PRIVATE
+        APPLICATION = yarn_service_protos.APPLICATION
+
+    class APPLICATION_ACCESS_TYPE(IntEnum):
+        APPACCESS_VIEW_APP = yarn_service_protos.APPACCESS_VIEW_APP
+        APPACCESS_MODIFY_APP = yarn_service_protos.APPACCESS_MODIFY_APP
+
     service_protocol = "org.apache.hadoop.yarn.api.ApplicationClientProtocolPB"
     service_stub = application_client_protocol.ApplicationClientProtocolService_Stub
 
     _getApplications = _RpcHandler( service_stub, service_protocol )
+    _getClusterMetrics = _RpcHandler( service_stub, service_protocol )
+    _getNewApplication = _RpcHandler( service_stub, service_protocol )
+    _getApplicationReport = _RpcHandler( service_stub, service_protocol )
+    _submitApplication = _RpcHandler( service_stub, service_protocol )
+
+    def create_local_resource( self, key=None, scheme=None, 
+                               host=None, port=None, resource_file=None,
+                               userInfo=None, size=None, timestamp=None,
+                               recource_type=None, visibility=None, pattern=None):
+
+        resource = yarn_protos.LocalResourceProto(scheme=scheme, host=host, port=port, file=resource_file, userInfo=userInfo)
+        if recource_type:
+            if not isinstance(recource_type, self.LOCAL_RESOURCE_TYPE):
+                raise YarnError("recource_type need to be of type LOCAL_RESOURCE_TYPE.")
+        if :
+            if not isinstance(visibility, self.LOCAL_RESOURCE_VISIBILITY):
+                raise YarnError("visibility need to be of type LOCAL_RESOURCE_VISIBILITY.")
+        local_resource = yarn_protos.LocalResourceProto(resource=resource, size=size, timestamp=timestamp, type=recource_type, visibility=visibility, pattern=pattern)
+        return yarn_protos.StringLocalResourceMapProto(key=key, value=local_resource)
+
+    def create_service_data(self, key=None, value=None):
+        if value:
+            if not isinstance(value, bytes):
+                raise YarnError("value need to be of type bytes.")
+        return yarn_protos.StringBytesMapProto(key=key, value=value)
+
+    def create_environment(self, key=None, value=None):
+        return yarn_protos.StringStringMapProto(key=key, value=value)
+
+    def create_application_acl(self, accessType=None, acl=None):
+        if accessType:
+            if not isinstance(accessType, self.APPLICATION_ACCESS_TYPE):
+                raise YarnError("accessType need to be of type APPLICATION_ACCESS_TYPE.")
+        return yarn_protos.ApplicationACLMapProto(accessType=accessType, acl=acl)
+
+    def create_container_context(self, local_resources_map=None, tokens=None, service_data_map=None, environment_map=None, commands=None, application_ACLs=None):
+        if local_resources_map:
+            if type(local_resources_map) in (tuple, list):
+                for local_resource in local_resources_map:
+                    if not isinstance(local_resource, yarn_protos.StringLocalResourceMapProto):
+                        raise YarnError("local_resources_map need to be a list of StringLocalResourceMapProto.")
+            else:
+                if isinstance(local_resources_map, yarn_protos.StringLocalResourceMapProto):
+                    local_resources_map = [local_resources_map]
+                else:
+                    raise YarnError("local_resources_map need to be a list of StringLocalResourceMapProto.")
+
+        if tokens:
+            if type(tokens) in (tuple, list):
+                for token in tokens:
+                    if not isinstance(token, bytes):
+                        raise YarnError("tokens need to be a list of bytes.")
+            else:
+                if isinstance(tokens, bytes):
+                    tokens = [tokens]
+                else:
+                    raise YarnError("tokens need to be a list of bytes.")
+
+        if service_data_map:
+            if type(service_data_map) in (tuple, list):
+                for service_data in service_data_map:
+                    if not isinstance(service_data, yarn_protos.StringBytesMapProto):
+                        raise YarnError("service_data_map need to be a list of StringBytesMapProto.")
+            else:
+                if isinstance(service_data_map, yarn_protos.StringBytesMapProto):
+                    service_data_map = [service_data_map]
+                else:
+                    raise YarnError("service_data_map need to be a list of StringBytesMapProto.")
+
+        if environment_map:
+            if type(environment_map) in (tuple, list):
+                for environment in environment_map:
+                    if not isinstance(environment, yarn_protos.StringStringMapProto):
+                        raise YarnError("environment_map need to be a list of StringStringMapProto.")
+            else:
+                if isinstance(environment_map, yarn_protos.StringStringMapProto):
+                    environment_map = [environment_map]
+                else:
+                    raise YarnError("environment_map need to be a list of StringStringMapProto.")
+
+        if commands:
+            if type(commands) in (tuple, list):
+                for command in commands:
+                    if not isinstance(command, str):
+                        raise YarnError("commands need to be a list of str.")
+            else:
+                if isinstance(commands, str):
+                    commands = [commands]
+                else:
+                    raise YarnError("commands need to be a list of str.")
+
+        if application_ACLs:
+            if type(application_ACLs) in (tuple, list):
+                for acl in application_ACLs:
+                    if not isinstance(acl, yarn_protos.ApplicationACLMapProto):
+                        raise YarnError("application_ACLs need to be a list of ApplicationACLMapProto.")
+            else:
+                if isinstance(application_ACLs, yarn_protos.ApplicationACLMapProto):
+                    application_ACLs = [application_ACLs]
+                else:
+                    raise YarnError("application_ACLs need to be a list of ApplicationACLMapProto.")
+
+        return ContainerLaunchContextProto( localResources=local_resources_map,
+                                            tokens=tokens, service_data=service_data_map,
+                                            environment=environment_map, command=commands,
+                                            application_ACLs=application_ACLs)
+
+
+    def submit_application(self, application_id=None, cluster_timestamp=None, application_name=None, queue =None,
+                           priority=None, am_container_spec=None, cancel_tokens_when_complete=True,
+                           unmanaged_am=False, maxAppAttempts=0, resource=None, applicationType="YARN",
+                           keep_containers_across_application_attempts=False, applicationTags=None,
+                           attempt_failures_validity_interval=1, log_aggregation_context=None,
+                           reservation_id=None, node_label_expression=None, am_container_resource_request=None):
+
+
+    def get_application_report(self, application_id, cluster_timestamp=None):
+        application = yarn_protos.ApplicationIdProto(id=application_id, cluster_timestamp=cluster_timestamp)
+        response = self._getApplicationReport(application)
+        if response:
+            return json_format.MessageToDict(response)
+        else:
+            return {}
+
+    def get_new_application(self):
+        response = self._getNewApplication()
+        if response:
+            return json_format.MessageToDict(response)
+        else:
+            return {}
+
+    def get_cluster_metrics(self):
+        response = self._getClusterMetrics()
+        if response:
+            return json_format.MessageToDict(response.cluster_metrics)
+        else:
+            return {}
 
     def get_applications(self, application_types=None, application_states=None, users=None,
                          queues=None, limit=None, start_begin=None, start_end=None,
