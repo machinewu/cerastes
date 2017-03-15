@@ -6,6 +6,7 @@ import cerastes.protobuf.applicationclient_protocol_pb2 as application_client_pr
 import cerastes.protobuf.yarn_service_protos_pb2 as yarn_service_protos
 import cerastes.protobuf.yarn_protos_pb2 as yarn_protos
 import cerastes.protobuf.HAServiceProtocol_pb2 as ha_protocol
+import cerastes.protobuf.Security_pb2 as security_protocol
 
 from cerastes.errors import RpcError, YarnError, AuthorizationException, StandbyError 
 from cerastes.controller import SocketRpcController
@@ -439,6 +440,20 @@ class YarnRMApplicationClient(YarnFailoverClient):
         APPACCESS_VIEW_APP = yarn_service_protos.APPACCESS_VIEW_APP
         APPACCESS_MODIFY_APP = yarn_service_protos.APPACCESS_MODIFY_APP
 
+    class NODE_STATES(IntEnum):
+        NS_NEW = yarn_protos.NS_NEW
+        NS_RUNNING = yarn_protos.NS_RUNNING
+        NS_UNHEALTHY = yarn_protos.NS_UNHEALTHY
+        NS_DECOMMISSIONED = yarn_protos.NS_DECOMMISSIONED
+        NS_LOST = yarn_protos.NS_LOST
+        NS_REBOOTED = yarn_protos.NS_REBOOTED
+
+    class RESERVATION_REQUEST_INTERPRETER(IntEnum):
+        R_ANY = yarn_protos.R_ANY
+        R_ALL = yarn_protos.R_ALL
+        R_ORDER = yarn_protos.R_ORDER
+        R_ORDER_NO_GAP = yarn_protos.R_ORDER_NO_GAP
+
     service_protocol = "org.apache.hadoop.yarn.api.ApplicationClientProtocolPB"
     service_stub = application_client_protocol.ApplicationClientProtocolService_Stub
 
@@ -447,11 +462,28 @@ class YarnRMApplicationClient(YarnFailoverClient):
     _getNewApplication = _RpcHandler( service_stub, service_protocol )
     _getApplicationReport = _RpcHandler( service_stub, service_protocol )
     _submitApplication = _RpcHandler( service_stub, service_protocol )
+    _forceKillApplication = _RpcHandler( service_stub, service_protocol )
+    _getClusterNodes = _RpcHandler( service_stub, service_protocol )
+    _getQueueInfo = _RpcHandler( service_stub, service_protocol )
+    _getQueueUserAcls = _RpcHandler( service_stub, service_protocol )
+    _getDelegationToken = _RpcHandler( service_stub, service_protocol )
+    _renewDelegationToken = _RpcHandler( service_stub, service_protocol )
+    _cancelDelegationToken = _RpcHandler( service_stub, service_protocol )
+    _moveApplicationAcrossQueues = _RpcHandler( service_stub, service_protocol )
+    _getApplicationAttemptReport = _RpcHandler( service_stub, service_protocol )
+    _getApplicationAttempts = _RpcHandler( service_stub, service_protocol )
+    _getContainerReport = _RpcHandler( service_stub, service_protocol )
+    _getContainers = _RpcHandler( service_stub, service_protocol )
+    _getNodeToLabels = _RpcHandler( service_stub, service_protocol )
+    _getClusterNodeLabels = _RpcHandler( service_stub, service_protocol )
+    _submitReservation = _RpcHandler( service_stub, service_protocol )
+    _updateReservation = _RpcHandler( service_stub, service_protocol )
+    _deleteReservation = _RpcHandler( service_stub, service_protocol )
 
-    def create_local_resource( self, key=None, scheme=None, 
-                               host=None, port=None, resource_file=None,
-                               userInfo=None, size=None, timestamp=None,
-                               recource_type=None, visibility=None, pattern=None):
+    def create_local_resource_proto( self, key=None, scheme=None, 
+                                     host=None, port=None, resource_file=None,
+                                     userInfo=None, size=None, timestamp=None,
+                                     recource_type=None, visibility=None, pattern=None):
 
         resource = yarn_protos.LocalResourceProto(scheme=scheme, host=host, port=port, file=resource_file, userInfo=userInfo)
         if recource_type:
@@ -463,22 +495,22 @@ class YarnRMApplicationClient(YarnFailoverClient):
         local_resource = yarn_protos.LocalResourceProto(resource=resource, size=size, timestamp=timestamp, type=recource_type, visibility=visibility, pattern=pattern)
         return yarn_protos.StringLocalResourceMapProto(key=key, value=local_resource)
 
-    def create_service_data(self, key=None, value=None):
+    def create_service_data_proto(self, key=None, value=None):
         if value:
             if not isinstance(value, bytes):
                 raise YarnError("value need to be of type bytes.")
         return yarn_protos.StringBytesMapProto(key=key, value=value)
 
-    def create_environment(self, key=None, value=None):
+    def create_environment_proto(self, key=None, value=None):
         return yarn_protos.StringStringMapProto(key=key, value=value)
 
-    def create_application_acl(self, accessType=None, acl=None):
+    def create_application_acl_proto(self, accessType=None, acl=None):
         if accessType:
             if not isinstance(accessType, self.APPLICATION_ACCESS_TYPE):
                 raise YarnError("accessType need to be of type APPLICATION_ACCESS_TYPE.")
         return yarn_protos.ApplicationACLMapProto(accessType=accessType, acl=acl)
 
-    def create_container_context(self, local_resources_map=None, tokens=None, service_data_map=None, environment_map=None, commands=None, application_ACLs=None):
+    def create_container_context_proto(self, local_resources_map=None, tokens=None, service_data_map=None, environment_map=None, commands=None, application_ACLs=None):
         if local_resources_map:
             if type(local_resources_map) in (tuple, list):
                 for local_resource in local_resources_map:
@@ -545,19 +577,258 @@ class YarnRMApplicationClient(YarnFailoverClient):
                 else:
                     raise YarnError("application_ACLs need to be a list of ApplicationACLMapProto.")
 
-        return ContainerLaunchContextProto( localResources=local_resources_map,
-                                            tokens=tokens, service_data=service_data_map,
-                                            environment=environment_map, command=commands,
-                                            application_ACLs=application_ACLs)
+        return yarn_protos.ContainerLaunchContextProto( localResources=local_resources_map,
+                                                        tokens=tokens, service_data=service_data_map,
+                                                        environment=environment_map, command=commands,
+                                                        application_ACLs=application_ACLs)
 
+    def create_resource_proto(self, memory=None, virtual_cores=None):
+        return yarn_protos.ResourceProto(memory=memory, virtual_cores=virtual_cores)
 
-    def submit_application(self, application_id=None, cluster_timestamp=None, application_name=None, queue =None,
+    def create_Log_aggregation_context_proto(self, include_pattern=None, exclude_pattern=None):
+        return yarn_protos.LogAggregationContextProto(include_pattern=include_pattern, exclude_pattern=exclude_pattern)
+
+    def create_reservationid_proto(self, id=None, cluster_timestamp=None):
+        return yarn_protos.ReservationIdProto(id=id, cluster_timestamp=cluster_timestamp)
+
+    def create_applicationid_proto(self, id=None, cluster_timestamp=None):
+        return yarn_protos.ApplicationIdProto(id=id, cluster_timestamp=cluster_timestamp)
+
+    def create_application_attempt_id_proto(self, application_id=None, attemptId=None):
+        if application_id:
+            if not isinstance(application_id, yarn_protos.ApplicationIdProto):
+                application_id = self.create_applicationid_proto(id=application_id)
+        return yarn_protos.ApplicationAttemptIdProto(application_id=application_id, attemptId=attemptId)
+
+    def create_containerid_proto(self, app_id, app_attempt_id, container_id):
+        if app_id:
+            if not isinstance(app_id, yarn_protos.ApplicationIdProto):
+                app_id = self.create_applicationid_proto(id=app_id)
+        if app_attempt_id:
+            if not isinstance(app_attempt_id, yarn_protos.ApplicationAttemptIdProto):
+                app_attempt_id = self.create_application_attempt_id_proto(application_id=app_id, attemptId=app_attempt_id)
+        return  yarn_protos.ContainerIdProto(app_id=app_id, app_attempt_id=app_attempt_id, id=container_id)
+
+    def create_container_resource_request(self, priority, resource_name, capability, num_containers, relax_locality, node_label_expression):
+        priority_proto = yarn_protos.PriorityProto(priority=priority)
+        if capability:
+            if not isinstance(capability, yarn_protos.ResourceProto):
+                raise YarnError("capability need to be of type ResourceProto.")
+
+        return yarn_protos.ResourceRequestProto( priority=priority_proto, resource_name=resource_name, capability=capability,
+                                                 num_containers=num_containers, relax_locality=relax_locality, node_label_expression=node_label_expression)
+
+    def create_priority_proto(self, priority=None):
+        return yarn_protos.PriorityProto(priority=priority)
+
+    def create_token_proto(self, identifier, password, kind, service):
+        return security_protocol.TokenProto(identifier=identifier, password=password, kind=kind, service=service)
+
+    def create_reservation_request_proto(self, capability=None, num_containers=None, concurrency=None, duration=None):
+        if capability:
+            if not isinstance(capability, yarn_protos.ResourceProto):
+                raise YarnError("capability need to be of type ResourceProto.")
+        return yarn_protos.ReservationRequestProto(capability=capability, num_containers=num_containers, concurrency=concurrency, duration=duration)
+
+    def create_reservation_requests_proto(self, reservation_resources=None, interpreter=None):
+        if reservation_resources:
+            if type(reservation_resources) in (tuple, list):
+                for reservation in reservation_resources:
+                   if not isinstance(reservation, yarn_protos.ReservationRequestProto):
+                      raise YarnError("reservation_resources need to be a list of ReservationRequestProto.")
+            else:
+                if isinstance(reservation_resources, yarn_protos.ReservationRequestProto):
+                    reservation_resources = [reservation_resources]
+                else:
+                    raise YarnError("reservation_resources need to be a list of ReservationRequestProto.")
+
+        if interpreter:
+            if not isinstance(interpreter, self.RESERVATION_REQUEST_INTERPRETER):
+                raise YarnError("interpreter need to be of type Enum RESERVATION_REQUEST_INTERPRETER.")
+        return yarn_protos.ReservationRequestsProto(reservation_resources=reservation_resources, interpreter=interpreter)
+
+    def create_reservation_definition_proto(self, reservation_requests=None, arrival=None, deadline=None, reservation_name=None):
+        if reservation_requests:
+            if not isinstance(reservation_requests, yarn_protos.ReservationRequestsProto):
+                raise YarnError("reservation_requests need to be of type ReservationRequestsProto.")
+        return yarn_protos.ReservationDefinitionProto(reservation_requests=reservation_requests, arrival=arrival, deadline=deadline, reservation_name=reservation_name)
+
+    def submit_application(self, application_id, application_name=None, queue =None,
                            priority=None, am_container_spec=None, cancel_tokens_when_complete=True,
                            unmanaged_am=False, maxAppAttempts=0, resource=None, applicationType="YARN",
                            keep_containers_across_application_attempts=False, applicationTags=None,
                            attempt_failures_validity_interval=1, log_aggregation_context=None,
                            reservation_id=None, node_label_expression=None, am_container_resource_request=None):
 
+        if priority:
+            if not isinstance(priority, yarn_protos.PriorityProto):
+                priority = self.create_priority_proto(priority=priority)
+
+        if application_id:
+            if not isinstance(application_id, yarn_protos.ApplicationIdProto):
+                application_id = self.create_applicationid_proto(id=application_id)
+
+        if am_container_spec:
+            if not isinstance(am_container_spec, yarn_protos.ContainerLaunchContextProto):
+                raise YarnError("am_container_spec need to be of type ContainerLaunchContextProto.")
+
+        if resource:
+            if not isinstance(resource, yarn_protos.ResourceProto):
+                raise YarnError("resource need to be of type ResourceProto.")
+
+        if log_aggregation_context:
+            if not isinstance(log_aggregation_context, yarn_protos.LogAggregationContextProto):
+                raise YarnError("log_aggregation_context need to be of type LogAggregationContextProto.")
+
+        if reservation_id:
+            if not isinstance(reservation_id, yarn_protos.ReservationIdProto):
+                reservation_id = self.create_reservationid_proto(id=application_id)
+
+        if am_container_resource_request:
+            if not isinstance(am_container_resource_request, yarn_protos.ResourceRequestProto):
+                raise YarnError("am_container_resource_request need to be of type ResourceRequestProto.")
+
+        submission_context = yarn_protos.ApplicationSubmissionContextProto( application_id=application_id, application_name=application_name, queue=queue,
+                                                                            priority=priority, am_container_spec=am_container_spec,
+                                                                            cancel_tokens_when_complete=cancel_tokens_when_complete,
+                                                                            unmanaged_am=unmanaged_am, maxAppAttempts=maxAppAttempts, resource=resource,
+                                                                            applicationType=applicationType,
+                                                                            keep_containers_across_application_attempts=keep_containers_across_application_attempts,
+                                                                            applicationTags=applicationTags,
+                                                                            attempt_failures_validity_interval=attempt_failures_validity_interval,
+                                                                            log_aggregation_context=log_aggregation_context, reservation_id=reservation_id,
+                                                                            node_label_expression=node_label_expression,
+                                                                            am_container_resource_request=am_container_resource_request)
+        response = self._submitApplication(application_submission_context=submission_context)
+        return True
+
+    def get_delegation_token(self, renewer=None):
+        response = self._getDelegationToken(renewer=renewer)
+        if response:
+            return json_format.MessageToDict(response)
+        else:
+            return {}
+
+    def renew_delegation_token(self, token):
+        if not isinstance(token, security_protocol.TokenProto):
+            raise YarnError("token need to be of type TokenProto.")
+        response = self._renewDelegationToken(token=token)
+        if response:
+            return json_format.MessageToDict(response)
+        else:
+            return {}  
+
+    def cancel_delegation_token(self, token):
+        if not isinstance(token, security_protocol.TokenProto):
+            raise YarnError("token need to be of type TokenProto.")
+        response = self._cancelDelegationToken(token=token)
+        return True  
+
+    def move_application_across_queues(self, application_id, target_queue):
+        if not isinstance(application_id, yarn_protos.ApplicationIdProto):
+            application_id = self.create_applicationid_proto(id=application_id)
+        response = self._moveApplicationAcrossQueues(application_id=application_id, target_queue=target_queue)
+        return True
+
+    def get_application_attempt_report(self, application_id=None, attemptId=None):
+        application_attempt = self.create_application_attempt_id_proto(application_id=application_id, attemptId=attemptId)
+        response = self._getApplicationAttemptReport(application_attempt_id=application_attempt)
+        if response:
+            return json_format.MessageToDict(response.application_attempt_report)
+        else:
+            return {}
+
+    def get_application_attempts(self, application_id):
+        if application_id:
+            if not isinstance(application_id, yarn_protos.ApplicationIdProto):
+                application_id = self.create_applicationid_proto(id=application_id)
+        response = self._getApplicationAttempts(application_id=application_id)
+        if response:
+            return [ json_format.MessageToDict(attempt) for attempt in response.application_attempts ]
+        else:
+            return []
+
+    def get_container_report(self, app_id, app_attempt_id, container_id):
+        containerid = self.create_containerid_proto(app_id=app_id, app_attempt_id=app_attempt_id, container_id=container_id)
+        response = self._getContainerReport(container_id=containerid)
+        if response:
+            return json_format.MessageToDict(response.container_report)
+        else:
+            return {}
+
+    def get_containers(self, application_id=None, attemptId=None ):
+        application_attempt = self.create_application_attempt_id_proto(application_id=application_id, attemptId=attemptId)
+        response = self._getContainers(application_attempt_id=application_attempt)
+        if response:
+            return [ json_format.MessageToDict(container) for container in response.containers ]
+        else:
+            return []
+
+    def submit_reservation(self, reservation_resources=None, arrival=None, deadline=None, reservation_name=None, queue=None, interpreter=None):
+        if reservation_resources:
+            if type(reservation_resources) in (tuple, list):
+                for reservation in reservation_resources:
+                   if not isinstance(reservation, yarn_protos.ReservationRequestProto):
+                      raise YarnError("reservation_resources need to be a list of ReservationRequestProto.")
+            else:
+                if isinstance(reservation_resources, yarn_protos.ReservationRequestProto):
+                    reservation_resources = [reservation_resources]
+                else:
+                    raise YarnError("reservation_resources need to be a list of ReservationRequestProto.")
+
+        if interpreter:
+            if not isinstance(interpreter, self.RESERVATION_REQUEST_INTERPRETER):
+                raise YarnError("interpreter need to be of type Enum RESERVATION_REQUEST_INTERPRETER.")
+        
+        reservation_requests = yarn_protos.ReservationRequestsProto(reservation_resources=reservation_resources, interpreter=interpreter)
+        reservation_definition = yarn_protos.ReservationDefinitionProto(reservation_requests=reservation_requests, arrival=arrival, deadline=deadline, reservation_name=reservation_name)
+        
+        response = self._submitReservation(queue=queue, reservation_definition=reservation_definition)
+
+        if response:
+            return json_format.MessageToDict(response.reservation_id)
+        else:
+            return {}
+
+    def update_reservation(self, reservation_id, reservation_resources=None, arrival=None, deadline=None, reservation_name=None, interpreter=None):
+        if reservation_id:
+            if not isinstance(reservation_id, yarn_protos.ReservationIdProto):
+                reservation_id = self.create_reservationid_proto(id=application_id)
+
+        if reservation_resources:
+            if type(reservation_resources) in (tuple, list):
+                for reservation in reservation_resources:
+                   if not isinstance(reservation, yarn_protos.ReservationRequestProto):
+                      raise YarnError("reservation_resources need to be a list of ReservationRequestProto.")
+            else:
+                if isinstance(reservation_resources, yarn_protos.ReservationRequestProto):
+                    reservation_resources = [reservation_resources]
+                else:
+                    raise YarnError("reservation_resources need to be a list of ReservationRequestProto.")
+
+        if interpreter:
+            if not isinstance(interpreter, self.RESERVATION_REQUEST_INTERPRETER):
+                raise YarnError("interpreter need to be of type Enum RESERVATION_REQUEST_INTERPRETER.")
+        
+        reservation_requests = yarn_protos.ReservationRequestsProto(reservation_resources=reservation_resources, interpreter=interpreter)
+        reservation_definition = yarn_protos.ReservationDefinitionProto(reservation_requests=reservation_requests, arrival=arrival, deadline=deadline, reservation_name=reservation_name)
+        response = self._submitReservation(queue=queue, reservation_definition=reservation_definition)
+        return True
+
+    def delete_reservation(self, reservation_id):
+        if reservation_id:
+            if not isinstance(reservation_id, yarn_protos.ReservationIdProto):
+                reservation_id = self.create_reservationid_proto(id=application_id)
+                
+        response = self._deleteReservation(reservation_id=reservation_id)
+        return True
+
+    def force_kill_application(self, application_id):
+        if application_id:
+            if not isinstance(application_id, yarn_protos.ApplicationIdProto):
+                application_id = self.create_applicationid_proto(id=application_id)
+        response = self._forceKillApplication(application_id=application_id)
+        return True
 
     def get_application_report(self, application_id, cluster_timestamp=None):
         application = yarn_protos.ApplicationIdProto(id=application_id, cluster_timestamp=cluster_timestamp)
@@ -578,6 +849,53 @@ class YarnRMApplicationClient(YarnFailoverClient):
         response = self._getClusterMetrics()
         if response:
             return json_format.MessageToDict(response.cluster_metrics)
+        else:
+            return {}
+
+    def get_cluster_nodes(self, node_states=None):
+        if node_states:
+            if type(node_states) in (tuple, list):
+                for n_state in node_states:
+                   if not isinstance(n_state, self.NODE_STATES):
+                      raise YarnError("node_states need to be a list of Enum NODE_STATES.")
+            else:
+                if isinstance(node_states, self.NODE_STATES):
+                    node_states = [node_states]
+                else:
+                    raise YarnError("node_states need to be a list of Enum NODE_STATES.")
+
+        response = self._getClusterNodes(nodeStates=node_states)
+        if response:
+            return json_format.MessageToDict(response.nodeReports)
+        else:
+            return {}
+
+    def get_node_to_labels(self):
+        response = self._getNodeToLabels()
+        if response:
+            return [ json_format.MessageToDict(label) for label in response.nodeToLabels ]
+        else:
+            return []
+
+    def get_cluster_node_labels(self):
+        response = self._getClusterNodeLabels()
+        if response:
+            return [ json_format.MessageToDict(label) for label in response.nodeLabels ]
+        else:
+            return []
+
+    def get_queue_info(self, queue_name, include_applications=False, include_child_queues=False, recursive=False):
+        response = self._getQueueInfo( queueName=queue_name, includeApplications=include_applications,
+                                       includeChildQueues=include_child_queues, recursive=recursive)
+        if response:
+            return json_format.MessageToDict(response.queueInfo)
+        else:
+            return {}
+
+    def get_queue_user_acls(self):
+        response = self._getQueueUserAcls()
+        if response:
+            return json_format.MessageToDict(response.queueUserAcls)
         else:
             return {}
 
