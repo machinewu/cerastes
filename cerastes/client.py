@@ -7,6 +7,8 @@ import cerastes.protobuf.yarn_service_protos_pb2 as yarn_service_protos
 import cerastes.protobuf.yarn_protos_pb2 as yarn_protos
 import cerastes.protobuf.HAServiceProtocol_pb2 as ha_protocol
 import cerastes.protobuf.Security_pb2 as security_protocol
+import cerastes.protobuf.application_history_client_pb2 as application_history_client_protocol
+import .proto_utils as proto_utils
 
 from cerastes.errors import RpcError, YarnError, AuthorizationException, StandbyError 
 from cerastes.controller import SocketRpcController
@@ -405,54 +407,175 @@ class YarnAdminHAClient(YarnAdminClient):
         response =  executor(active_client.service, controller, request)
         return response
 
+class YarnHistoryServerClient(YarnClient):
+    """
+      Yarn History Server applications client.
+    """
+
+    service_protocol = "org.apache.hadoop.yarn.api.ApplicationHistoryProtocol"
+    service_stub = application_history_client_protocol.ApplicationHistoryProtocolService_Stub
+
+    _getApplicationReport = _RpcHandler( service_stub, service_protocol )
+    _getApplications = _RpcHandler( service_stub, service_protocol )
+    _getApplicationAttemptReport = _RpcHandler( service_stub, service_protocol )
+    _getApplicationAttempts = _RpcHandler( service_stub, service_protocol )
+    _getContainerReport = _RpcHandler( service_stub, service_protocol )
+    _getContainers = _RpcHandler( service_stub, service_protocol )
+    _getDelegationToken = _RpcHandler( service_stub, service_protocol )
+    _renewDelegationToken = _RpcHandler( service_stub, service_protocol )
+    _cancelDelegationToken = _RpcHandler( service_stub, service_protocol )
+
+    ''' Application Functions '''
+
+    def get_application_report(self, application_id, cluster_timestamp=None):
+        application = yarn_protos.ApplicationIdProto(id=application_id, cluster_timestamp=cluster_timestamp)
+        response = self._getApplicationReport(application)
+        if response:
+            return json_format.MessageToDict(response)
+        else:
+            return {}
+
+    def get_applications(self, application_types=None, application_states=None, users=None,
+                         queues=None, limit=None, start_begin=None, start_end=None,
+                         finish_begin=None, finish_end=None, applicationTags=None, scope=None):
+
+        if application_types:
+           if not type(application_types) in (tuple, list):
+              application_types = [application_types]
+
+        if users:
+           if not type(users) in (tuple, list):
+              users = [users]
+
+        if queues:
+           if not type(queues) in (tuple, list):
+              queues = [queues]
+
+        if start_begin:
+           if not isinstance(start_begin, datetime):
+              start_begin = int( (start_begin - datetime.utcfromtimestamp(0)).total_seconds() * 1000.0)
+           elif not isinstance(start_begin, int):
+              raise YarnError("only int and datetime are valid values for start_begin.")
+
+        if start_end:
+           if not isinstance(start_end, datetime):
+              start_end = int( (start_end - datetime.utcfromtimestamp(0)).total_seconds() * 1000.0)
+           elif not isinstance(start_end, int):
+              raise YarnError("only int and datetime are valid values for start_end.")
+
+        if finish_begin:
+           if not isinstance(finish_begin, datetime):
+              finish_begin = int( (finish_begin - datetime.utcfromtimestamp(0)).total_seconds() * 1000.0)
+           elif not isinstance(finish_begin, int):
+              raise YarnError("only int and datetime are valid values for finish_begin.")
+
+        if finish_end:
+           if not isinstance(finish_end, datetime):
+              finish_end = int( (finish_end - datetime.utcfromtimestamp(0)).total_seconds() * 1000.0)
+           elif not isinstance(finish_end, int):
+              raise YarnError("only int and datetime are valid values for finish_end.")
+
+        if applicationTags:
+           if not type(applicationTags) in (tuple, list):
+              applicationTags = [applicationTags]
+
+        if application_states:
+            if type(application_states) in (tuple, list):
+                for app_state in application_states:
+                   if not isinstance(app_state, proto_utils.APPLICATION_STATES):
+                      raise YarnError("application_states need to be a list of Enum APPLICATION_STATES.")
+            else:
+                if isinstance(application_states, proto_utils.APPLICATION_STATES):
+                    application_states = [application_states]
+                else:
+                    raise YarnError("application_states need to be a list of Enum APPLICATION_STATES.")
+
+        if scope:
+            if type(scope) in (tuple, list):
+                for s in scope:
+                    if not isinstance(s, proto_utils.APPLICATION_SCOPE):
+                        raise YarnError("scope need to be a list of Enum APPLICATION_SCOPE.")
+            else:
+                if isinstance(scope, proto_utils.APPLICATION_SCOPE):
+                    scope = [scope]
+                else:
+                    raise YarnError("scope need to be a list of Enum APPLICATION_SCOPE.")
+
+        response = self._getApplications( application_types=application_types, application_states=application_states,
+                                          users=users,queues=queues, limit=limit, start_begin=start_begin, start_end=start_end,
+                                          finish_begin=finish_begin, finish_end=finish_end, applicationTags=applicationTags, scope=scope)
+        if response:
+            return [ json_format.MessageToDict(application) for application in response.applications ]
+        else:
+            return []
+
+    ''' Application Attempts Functions '''
+
+    def get_application_attempt_report(self, application_id=None, attemptId=None):
+        application_attempt = proto_utils.create_application_attempt_id_proto(application_id=application_id, attemptId=attemptId)
+        response = self._getApplicationAttemptReport(application_attempt_id=application_attempt)
+        if response:
+            return json_format.MessageToDict(response.application_attempt_report)
+        else:
+            return {}
+
+    def get_application_attempts(self, application_id):
+        if application_id:
+            if not isinstance(application_id, yarn_protos.ApplicationIdProto):
+                application_id = proto_utils.create_applicationid_proto(id=application_id)
+        response = self._getApplicationAttempts(application_id=application_id)
+        if response:
+            return [ json_format.MessageToDict(attempt) for attempt in response.application_attempts ]
+        else:
+            return []
+
+    ''' Container Functions '''
+
+    def get_container_report(self, app_id, app_attempt_id, container_id):
+        containerid = proto_utils.create_containerid_proto(app_id=app_id, app_attempt_id=app_attempt_id, container_id=container_id)
+        response = self._getContainerReport(container_id=containerid)
+        if response:
+            return json_format.MessageToDict(response.container_report)
+        else:
+            return {}
+
+    def get_containers(self, application_id=None, attemptId=None ):
+        application_attempt = proto_utils.create_application_attempt_id_proto(application_id=application_id, attemptId=attemptId)
+        response = self._getContainers(application_attempt_id=application_attempt)
+        if response:
+            return [ json_format.MessageToDict(container) for container in response.containers ]
+        else:
+            return []
+
+    ''' Token Functions '''
+
+    def get_delegation_token(self, renewer=None):
+        response = self._getDelegationToken(renewer=renewer)
+        if response:
+            return json_format.MessageToDict(response)
+        else:
+            return {}
+
+    def renew_delegation_token(self, token):
+        if not isinstance(token, security_protocol.TokenProto):
+            raise YarnError("token need to be of type TokenProto.")
+        response = self._renewDelegationToken(token=token)
+        if response:
+            return json_format.MessageToDict(response)
+        else:
+            return {}  
+
+    def cancel_delegation_token(self, token):
+        if not isinstance(token, security_protocol.TokenProto):
+            raise YarnError("token need to be of type TokenProto.")
+        response = self._cancelDelegationToken(token=token)
+        return True  
+
 class YarnRMApplicationClient(YarnFailoverClient):
     """
       Yarn Resource Manager applications client.
       Typically on port 8032.
     """
-
-    class APPLICATION_STATES(IntEnum):
-        ACCEPTED = yarn_protos.ACCEPTED
-        NEW = yarn_protos.NEW
-        NEW_SAVING = yarn_protos.NEW_SAVING
-        SUBMITTED = yarn_protos.SUBMITTED
-        RUNNING = yarn_protos.RUNNING
-        FINISHED = yarn_protos.FINISHED
-        KILLED = yarn_protos.KILLED
-        FAILED = yarn_protos.FAILED
-
-    class APPLICATION_SCOPE(IntEnum):
-        ALL = yarn_service_protos.ALL
-        VIEWABLE = yarn_service_protos.VIEWABLE
-        OWN = yarn_service_protos.OWN
-
-    class LOCAL_RESOURCE_TYPE(IntEnum):
-        ARCHIVE = yarn_service_protos.ARCHIVE
-        FILE = yarn_service_protos.FILE
-        PATTERN = yarn_service_protos.PATTERN
-
-    class LOCAL_RESOURCE_VISIBILITY(IntEnum):
-        PUBLIC = yarn_service_protos.PUBLIC
-        PRIVATE = yarn_service_protos.PRIVATE
-        APPLICATION = yarn_service_protos.APPLICATION
-
-    class APPLICATION_ACCESS_TYPE(IntEnum):
-        APPACCESS_VIEW_APP = yarn_service_protos.APPACCESS_VIEW_APP
-        APPACCESS_MODIFY_APP = yarn_service_protos.APPACCESS_MODIFY_APP
-
-    class NODE_STATES(IntEnum):
-        NS_NEW = yarn_protos.NS_NEW
-        NS_RUNNING = yarn_protos.NS_RUNNING
-        NS_UNHEALTHY = yarn_protos.NS_UNHEALTHY
-        NS_DECOMMISSIONED = yarn_protos.NS_DECOMMISSIONED
-        NS_LOST = yarn_protos.NS_LOST
-        NS_REBOOTED = yarn_protos.NS_REBOOTED
-
-    class RESERVATION_REQUEST_INTERPRETER(IntEnum):
-        R_ANY = yarn_protos.R_ANY
-        R_ALL = yarn_protos.R_ALL
-        R_ORDER = yarn_protos.R_ORDER
-        R_ORDER_NO_GAP = yarn_protos.R_ORDER_NO_GAP
 
     service_protocol = "org.apache.hadoop.yarn.api.ApplicationClientProtocolPB"
     service_stub = application_client_protocol.ApplicationClientProtocolService_Stub
@@ -480,178 +603,6 @@ class YarnRMApplicationClient(YarnFailoverClient):
     _updateReservation = _RpcHandler( service_stub, service_protocol )
     _deleteReservation = _RpcHandler( service_stub, service_protocol )
 
-    def create_local_resource_proto( self, key=None, scheme=None, 
-                                     host=None, port=None, resource_file=None,
-                                     userInfo=None, size=None, timestamp=None,
-                                     recource_type=None, visibility=None, pattern=None):
-
-        resource = yarn_protos.LocalResourceProto(scheme=scheme, host=host, port=port, file=resource_file, userInfo=userInfo)
-        if recource_type:
-            if not isinstance(recource_type, self.LOCAL_RESOURCE_TYPE):
-                raise YarnError("recource_type need to be of type LOCAL_RESOURCE_TYPE.")
-        if :
-            if not isinstance(visibility, self.LOCAL_RESOURCE_VISIBILITY):
-                raise YarnError("visibility need to be of type LOCAL_RESOURCE_VISIBILITY.")
-        local_resource = yarn_protos.LocalResourceProto(resource=resource, size=size, timestamp=timestamp, type=recource_type, visibility=visibility, pattern=pattern)
-        return yarn_protos.StringLocalResourceMapProto(key=key, value=local_resource)
-
-    def create_service_data_proto(self, key=None, value=None):
-        if value:
-            if not isinstance(value, bytes):
-                raise YarnError("value need to be of type bytes.")
-        return yarn_protos.StringBytesMapProto(key=key, value=value)
-
-    def create_environment_proto(self, key=None, value=None):
-        return yarn_protos.StringStringMapProto(key=key, value=value)
-
-    def create_application_acl_proto(self, accessType=None, acl=None):
-        if accessType:
-            if not isinstance(accessType, self.APPLICATION_ACCESS_TYPE):
-                raise YarnError("accessType need to be of type APPLICATION_ACCESS_TYPE.")
-        return yarn_protos.ApplicationACLMapProto(accessType=accessType, acl=acl)
-
-    def create_container_context_proto(self, local_resources_map=None, tokens=None, service_data_map=None, environment_map=None, commands=None, application_ACLs=None):
-        if local_resources_map:
-            if type(local_resources_map) in (tuple, list):
-                for local_resource in local_resources_map:
-                    if not isinstance(local_resource, yarn_protos.StringLocalResourceMapProto):
-                        raise YarnError("local_resources_map need to be a list of StringLocalResourceMapProto.")
-            else:
-                if isinstance(local_resources_map, yarn_protos.StringLocalResourceMapProto):
-                    local_resources_map = [local_resources_map]
-                else:
-                    raise YarnError("local_resources_map need to be a list of StringLocalResourceMapProto.")
-
-        if tokens:
-            if type(tokens) in (tuple, list):
-                for token in tokens:
-                    if not isinstance(token, bytes):
-                        raise YarnError("tokens need to be a list of bytes.")
-            else:
-                if isinstance(tokens, bytes):
-                    tokens = [tokens]
-                else:
-                    raise YarnError("tokens need to be a list of bytes.")
-
-        if service_data_map:
-            if type(service_data_map) in (tuple, list):
-                for service_data in service_data_map:
-                    if not isinstance(service_data, yarn_protos.StringBytesMapProto):
-                        raise YarnError("service_data_map need to be a list of StringBytesMapProto.")
-            else:
-                if isinstance(service_data_map, yarn_protos.StringBytesMapProto):
-                    service_data_map = [service_data_map]
-                else:
-                    raise YarnError("service_data_map need to be a list of StringBytesMapProto.")
-
-        if environment_map:
-            if type(environment_map) in (tuple, list):
-                for environment in environment_map:
-                    if not isinstance(environment, yarn_protos.StringStringMapProto):
-                        raise YarnError("environment_map need to be a list of StringStringMapProto.")
-            else:
-                if isinstance(environment_map, yarn_protos.StringStringMapProto):
-                    environment_map = [environment_map]
-                else:
-                    raise YarnError("environment_map need to be a list of StringStringMapProto.")
-
-        if commands:
-            if type(commands) in (tuple, list):
-                for command in commands:
-                    if not isinstance(command, str):
-                        raise YarnError("commands need to be a list of str.")
-            else:
-                if isinstance(commands, str):
-                    commands = [commands]
-                else:
-                    raise YarnError("commands need to be a list of str.")
-
-        if application_ACLs:
-            if type(application_ACLs) in (tuple, list):
-                for acl in application_ACLs:
-                    if not isinstance(acl, yarn_protos.ApplicationACLMapProto):
-                        raise YarnError("application_ACLs need to be a list of ApplicationACLMapProto.")
-            else:
-                if isinstance(application_ACLs, yarn_protos.ApplicationACLMapProto):
-                    application_ACLs = [application_ACLs]
-                else:
-                    raise YarnError("application_ACLs need to be a list of ApplicationACLMapProto.")
-
-        return yarn_protos.ContainerLaunchContextProto( localResources=local_resources_map,
-                                                        tokens=tokens, service_data=service_data_map,
-                                                        environment=environment_map, command=commands,
-                                                        application_ACLs=application_ACLs)
-
-    def create_resource_proto(self, memory=None, virtual_cores=None):
-        return yarn_protos.ResourceProto(memory=memory, virtual_cores=virtual_cores)
-
-    def create_Log_aggregation_context_proto(self, include_pattern=None, exclude_pattern=None):
-        return yarn_protos.LogAggregationContextProto(include_pattern=include_pattern, exclude_pattern=exclude_pattern)
-
-    def create_reservationid_proto(self, id=None, cluster_timestamp=None):
-        return yarn_protos.ReservationIdProto(id=id, cluster_timestamp=cluster_timestamp)
-
-    def create_applicationid_proto(self, id=None, cluster_timestamp=None):
-        return yarn_protos.ApplicationIdProto(id=id, cluster_timestamp=cluster_timestamp)
-
-    def create_application_attempt_id_proto(self, application_id=None, attemptId=None):
-        if application_id:
-            if not isinstance(application_id, yarn_protos.ApplicationIdProto):
-                application_id = self.create_applicationid_proto(id=application_id)
-        return yarn_protos.ApplicationAttemptIdProto(application_id=application_id, attemptId=attemptId)
-
-    def create_containerid_proto(self, app_id, app_attempt_id, container_id):
-        if app_id:
-            if not isinstance(app_id, yarn_protos.ApplicationIdProto):
-                app_id = self.create_applicationid_proto(id=app_id)
-        if app_attempt_id:
-            if not isinstance(app_attempt_id, yarn_protos.ApplicationAttemptIdProto):
-                app_attempt_id = self.create_application_attempt_id_proto(application_id=app_id, attemptId=app_attempt_id)
-        return  yarn_protos.ContainerIdProto(app_id=app_id, app_attempt_id=app_attempt_id, id=container_id)
-
-    def create_container_resource_request(self, priority, resource_name, capability, num_containers, relax_locality, node_label_expression):
-        priority_proto = yarn_protos.PriorityProto(priority=priority)
-        if capability:
-            if not isinstance(capability, yarn_protos.ResourceProto):
-                raise YarnError("capability need to be of type ResourceProto.")
-
-        return yarn_protos.ResourceRequestProto( priority=priority_proto, resource_name=resource_name, capability=capability,
-                                                 num_containers=num_containers, relax_locality=relax_locality, node_label_expression=node_label_expression)
-
-    def create_priority_proto(self, priority=None):
-        return yarn_protos.PriorityProto(priority=priority)
-
-    def create_token_proto(self, identifier, password, kind, service):
-        return security_protocol.TokenProto(identifier=identifier, password=password, kind=kind, service=service)
-
-    def create_reservation_request_proto(self, capability=None, num_containers=None, concurrency=None, duration=None):
-        if capability:
-            if not isinstance(capability, yarn_protos.ResourceProto):
-                raise YarnError("capability need to be of type ResourceProto.")
-        return yarn_protos.ReservationRequestProto(capability=capability, num_containers=num_containers, concurrency=concurrency, duration=duration)
-
-    def create_reservation_requests_proto(self, reservation_resources=None, interpreter=None):
-        if reservation_resources:
-            if type(reservation_resources) in (tuple, list):
-                for reservation in reservation_resources:
-                   if not isinstance(reservation, yarn_protos.ReservationRequestProto):
-                      raise YarnError("reservation_resources need to be a list of ReservationRequestProto.")
-            else:
-                if isinstance(reservation_resources, yarn_protos.ReservationRequestProto):
-                    reservation_resources = [reservation_resources]
-                else:
-                    raise YarnError("reservation_resources need to be a list of ReservationRequestProto.")
-
-        if interpreter:
-            if not isinstance(interpreter, self.RESERVATION_REQUEST_INTERPRETER):
-                raise YarnError("interpreter need to be of type Enum RESERVATION_REQUEST_INTERPRETER.")
-        return yarn_protos.ReservationRequestsProto(reservation_resources=reservation_resources, interpreter=interpreter)
-
-    def create_reservation_definition_proto(self, reservation_requests=None, arrival=None, deadline=None, reservation_name=None):
-        if reservation_requests:
-            if not isinstance(reservation_requests, yarn_protos.ReservationRequestsProto):
-                raise YarnError("reservation_requests need to be of type ReservationRequestsProto.")
-        return yarn_protos.ReservationDefinitionProto(reservation_requests=reservation_requests, arrival=arrival, deadline=deadline, reservation_name=reservation_name)
 
     def submit_application(self, application_id, application_name=None, queue =None,
                            priority=None, am_container_spec=None, cancel_tokens_when_complete=True,
@@ -662,11 +613,11 @@ class YarnRMApplicationClient(YarnFailoverClient):
 
         if priority:
             if not isinstance(priority, yarn_protos.PriorityProto):
-                priority = self.create_priority_proto(priority=priority)
+                priority = proto_utils.create_priority_proto(priority=priority)
 
         if application_id:
             if not isinstance(application_id, yarn_protos.ApplicationIdProto):
-                application_id = self.create_applicationid_proto(id=application_id)
+                application_id = proto_utils.create_applicationid_proto(id=application_id)
 
         if am_container_spec:
             if not isinstance(am_container_spec, yarn_protos.ContainerLaunchContextProto):
@@ -682,7 +633,7 @@ class YarnRMApplicationClient(YarnFailoverClient):
 
         if reservation_id:
             if not isinstance(reservation_id, yarn_protos.ReservationIdProto):
-                reservation_id = self.create_reservationid_proto(id=application_id)
+                reservation_id = proto_utils.create_reservationid_proto(id=application_id)
 
         if am_container_resource_request:
             if not isinstance(am_container_resource_request, yarn_protos.ResourceRequestProto):
@@ -726,12 +677,12 @@ class YarnRMApplicationClient(YarnFailoverClient):
 
     def move_application_across_queues(self, application_id, target_queue):
         if not isinstance(application_id, yarn_protos.ApplicationIdProto):
-            application_id = self.create_applicationid_proto(id=application_id)
+            application_id = proto_utils.create_applicationid_proto(id=application_id)
         response = self._moveApplicationAcrossQueues(application_id=application_id, target_queue=target_queue)
         return True
 
     def get_application_attempt_report(self, application_id=None, attemptId=None):
-        application_attempt = self.create_application_attempt_id_proto(application_id=application_id, attemptId=attemptId)
+        application_attempt = proto_utils.create_application_attempt_id_proto(application_id=application_id, attemptId=attemptId)
         response = self._getApplicationAttemptReport(application_attempt_id=application_attempt)
         if response:
             return json_format.MessageToDict(response.application_attempt_report)
@@ -741,7 +692,7 @@ class YarnRMApplicationClient(YarnFailoverClient):
     def get_application_attempts(self, application_id):
         if application_id:
             if not isinstance(application_id, yarn_protos.ApplicationIdProto):
-                application_id = self.create_applicationid_proto(id=application_id)
+                application_id = proto_utils.create_applicationid_proto(id=application_id)
         response = self._getApplicationAttempts(application_id=application_id)
         if response:
             return [ json_format.MessageToDict(attempt) for attempt in response.application_attempts ]
@@ -749,7 +700,7 @@ class YarnRMApplicationClient(YarnFailoverClient):
             return []
 
     def get_container_report(self, app_id, app_attempt_id, container_id):
-        containerid = self.create_containerid_proto(app_id=app_id, app_attempt_id=app_attempt_id, container_id=container_id)
+        containerid = proto_utils.create_containerid_proto(app_id=app_id, app_attempt_id=app_attempt_id, container_id=container_id)
         response = self._getContainerReport(container_id=containerid)
         if response:
             return json_format.MessageToDict(response.container_report)
@@ -757,7 +708,7 @@ class YarnRMApplicationClient(YarnFailoverClient):
             return {}
 
     def get_containers(self, application_id=None, attemptId=None ):
-        application_attempt = self.create_application_attempt_id_proto(application_id=application_id, attemptId=attemptId)
+        application_attempt = proto_utils.create_application_attempt_id_proto(application_id=application_id, attemptId=attemptId)
         response = self._getContainers(application_attempt_id=application_attempt)
         if response:
             return [ json_format.MessageToDict(container) for container in response.containers ]
@@ -777,7 +728,7 @@ class YarnRMApplicationClient(YarnFailoverClient):
                     raise YarnError("reservation_resources need to be a list of ReservationRequestProto.")
 
         if interpreter:
-            if not isinstance(interpreter, self.RESERVATION_REQUEST_INTERPRETER):
+            if not isinstance(interpreter, proto_utils.RESERVATION_REQUEST_INTERPRETER):
                 raise YarnError("interpreter need to be of type Enum RESERVATION_REQUEST_INTERPRETER.")
         
         reservation_requests = yarn_protos.ReservationRequestsProto(reservation_resources=reservation_resources, interpreter=interpreter)
@@ -793,7 +744,7 @@ class YarnRMApplicationClient(YarnFailoverClient):
     def update_reservation(self, reservation_id, reservation_resources=None, arrival=None, deadline=None, reservation_name=None, interpreter=None):
         if reservation_id:
             if not isinstance(reservation_id, yarn_protos.ReservationIdProto):
-                reservation_id = self.create_reservationid_proto(id=application_id)
+                reservation_id = proto_utils.create_reservationid_proto(id=application_id)
 
         if reservation_resources:
             if type(reservation_resources) in (tuple, list):
@@ -807,7 +758,7 @@ class YarnRMApplicationClient(YarnFailoverClient):
                     raise YarnError("reservation_resources need to be a list of ReservationRequestProto.")
 
         if interpreter:
-            if not isinstance(interpreter, self.RESERVATION_REQUEST_INTERPRETER):
+            if not isinstance(interpreter, proto_utils.RESERVATION_REQUEST_INTERPRETER):
                 raise YarnError("interpreter need to be of type Enum RESERVATION_REQUEST_INTERPRETER.")
         
         reservation_requests = yarn_protos.ReservationRequestsProto(reservation_resources=reservation_resources, interpreter=interpreter)
@@ -818,7 +769,7 @@ class YarnRMApplicationClient(YarnFailoverClient):
     def delete_reservation(self, reservation_id):
         if reservation_id:
             if not isinstance(reservation_id, yarn_protos.ReservationIdProto):
-                reservation_id = self.create_reservationid_proto(id=application_id)
+                reservation_id = proto_utils.create_reservationid_proto(id=application_id)
                 
         response = self._deleteReservation(reservation_id=reservation_id)
         return True
@@ -826,7 +777,7 @@ class YarnRMApplicationClient(YarnFailoverClient):
     def force_kill_application(self, application_id):
         if application_id:
             if not isinstance(application_id, yarn_protos.ApplicationIdProto):
-                application_id = self.create_applicationid_proto(id=application_id)
+                application_id = proto_utils.create_applicationid_proto(id=application_id)
         response = self._forceKillApplication(application_id=application_id)
         return True
 
@@ -856,10 +807,10 @@ class YarnRMApplicationClient(YarnFailoverClient):
         if node_states:
             if type(node_states) in (tuple, list):
                 for n_state in node_states:
-                   if not isinstance(n_state, self.NODE_STATES):
+                   if not isinstance(n_state, proto_utils.NODE_STATES):
                       raise YarnError("node_states need to be a list of Enum NODE_STATES.")
             else:
-                if isinstance(node_states, self.NODE_STATES):
+                if isinstance(node_states, proto_utils.NODE_STATES):
                     node_states = [node_states]
                 else:
                     raise YarnError("node_states need to be a list of Enum NODE_STATES.")
@@ -946,10 +897,10 @@ class YarnRMApplicationClient(YarnFailoverClient):
         if application_states:
             if type(application_states) in (tuple, list):
                 for app_state in application_states:
-                   if not isinstance(app_state, self.APPLICATION_STATES):
+                   if not isinstance(app_state, proto_utils.APPLICATION_STATES):
                       raise YarnError("application_states need to be a list of Enum APPLICATION_STATES.")
             else:
-                if isinstance(application_states, self.APPLICATION_STATES):
+                if isinstance(application_states, proto_utils.APPLICATION_STATES):
                     application_states = [application_states]
                 else:
                     raise YarnError("application_states need to be a list of Enum APPLICATION_STATES.")
@@ -957,10 +908,10 @@ class YarnRMApplicationClient(YarnFailoverClient):
         if scope:
             if type(scope) in (tuple, list):
                 for s in scope:
-                    if not isinstance(s, self.APPLICATION_SCOPE):
+                    if not isinstance(s, proto_utils.APPLICATION_SCOPE):
                         raise YarnError("scope need to be a list of Enum APPLICATION_SCOPE.")
             else:
-                if isinstance(scope, self.APPLICATION_SCOPE):
+                if isinstance(scope, proto_utils.APPLICATION_SCOPE):
                     scope = [scope]
                 else:
                     raise YarnError("scope need to be a list of Enum APPLICATION_SCOPE.")
