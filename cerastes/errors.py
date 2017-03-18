@@ -23,11 +23,6 @@ class RpcError(Exception):
   :param message: Error message.
   :param args: optional Message formatting arguments.
   """
-  def __init__(self, message, *args):
-    self.class_name = ""
-    self.message = message
-    super(RpcError, self).__init__(message % args if args else message)
-
   def __init__(self, class_name, message):
     self.class_name = class_name
     # keep a copy of the raw message
@@ -44,7 +39,7 @@ class RpcError(Exception):
       The part that are interesting are the first line and the caused by lines
       we just ignore the rest.
     '''
-    pattern = re.compile(r'(\t|\s)*(at|...)\s')
+    pattern = re.compile(r'^(\t|\s)*(at|\.\.\.)\s')
     for line in message.splitlines():
        if re.match(pattern, line):
            continue
@@ -54,16 +49,16 @@ class RpcError(Exception):
 
 class RpcAuthenticationError(RpcError):
   def __init__(self, message, *args):
-    super(RpcAuthenticationError, self).__init__(message % args if args else message)
+    super(RpcAuthenticationError, self).__init__("", message % args if args else message)
 
 class MalformedRpcRequestError(RpcError):
   def __init__(self, message, *args):
-    super(MalformedRpcRequestError, self).__init__(message % args if args else message)
+    super(MalformedRpcRequestError, self).__init__("", message % args if args else message)
 
 class RpcSaslError(RpcError):
   def __init__(self, message, *args):
-    super(RpcSaslError, self).__init__(message % args if args else message)
+    super(RpcSaslError, self).__init__("", message % args if args else message)
 
 class RpcBufferError(RpcError):
   def __init__(self, message, *args):
-    super(RpcBufferError, self).__init__(message % args if args else message)
+    super(RpcBufferError, self).__init__("", message % args if args else message)

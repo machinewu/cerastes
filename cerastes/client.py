@@ -8,7 +8,10 @@ import cerastes.protobuf.yarn_protos_pb2 as yarn_protos
 import cerastes.protobuf.HAServiceProtocol_pb2 as ha_protocol
 import cerastes.protobuf.Security_pb2 as security_protocol
 import cerastes.protobuf.application_history_client_pb2 as application_history_client_protocol
-import .proto_utils as proto_utils
+import cerastes.protobuf.MRClientProtocol_pb2 as mr_client_protocol
+import cerastes.protobuf.HSAdminRefreshProtocol_pb2 as hs_admin_protocol
+import cerastes.protobuf.mr_protos_pb2 as mr_protos
+import cerastes.proto_utils as proto_utils
 
 from cerastes.errors import RpcError, YarnError, AuthorizationException, StandbyError 
 from cerastes.controller import SocketRpcController
@@ -407,11 +410,164 @@ class YarnAdminHAClient(YarnAdminClient):
         response =  executor(active_client.service, controller, request)
         return response
 
-class YarnHistoryServerClient(YarnClient):
+class HSAdminClient(YarnClient):
+
+    service_protocol = "org.apache.hadoop.mapreduce.v2.api.HSAdminRefreshProtocol"
+    service_stub = hs_admin_protocol.HSAdminRefreshProtocolService_Stub
+
+    _refreshAdminAcls = _RpcHandler( service_stub, service_protocol )
+    _refreshLoadedJobCache = _RpcHandler( service_stub, service_protocol )
+    _refreshJobRetentionSettings = _RpcHandler( service_stub, service_protocol )
+    _refreshLogRetentionSettings = _RpcHandler( service_stub, service_protocol )
+
+    def refresh_log_retention_settings(self):
+        response = self._refreshLogRetentionSettings()
+
+    def refresh_job_retention_settings(self):
+        response = self._refreshJobRetentionSettings()
+
+    def refresh_admin_acls(self):
+        response = self._refreshAdminAcls()
+
+    def refresh_loaded_job_cache(self):
+        response = self._refreshLoadedJobCache()
+
+class MRClient(YarnClient):
     """
-      Yarn History Server applications client.
+      Client for the Map Reduce Job History server.
     """
 
+    service_protocol = "org.apache.hadoop.mapreduce.v2.api.HSClientProtocolPB"
+    service_stub = mr_client_protocol.MRClientProtocolService_Stub
+
+    _getJobReport = _RpcHandler( service_stub, service_protocol )
+    _getTaskReport = _RpcHandler( service_stub, service_protocol )
+    _getTaskAttemptReport = _RpcHandler( service_stub, service_protocol )
+    _getCounters = _RpcHandler( service_stub, service_protocol )
+    _getDelegationToken = _RpcHandler( service_stub, service_protocol )
+    _renewDelegationToken = _RpcHandler( service_stub, service_protocol )
+    _cancelDelegationToken = _RpcHandler( service_stub, service_protocol )
+    _getTaskAttemptCompletionEvents = _RpcHandler( service_stub, service_protocol )
+    _getTaskReports = _RpcHandler( service_stub, service_protocol )
+    _getDiagnostics = _RpcHandler( service_stub, service_protocol )
+    _killJob = _RpcHandler( service_stub, service_protocol )
+    _killTask = _RpcHandler( service_stub, service_protocol )
+    _killTaskAttempt = _RpcHandler( service_stub, service_protocol )
+    _failTaskAttempt = _RpcHandler( service_stub, service_protocol )
+
+    ''' Kill Functions '''
+
+    def fail_task_attempt(self, attempt_id, task_id=None):
+        task_attempt = proto_utils.create_task_attempt_id_proto(attempt_id=attempt_id, task_id=task_id)
+        response = self._failTaskAttempt(task_attempt_id=task_attempt)
+
+    def kill_task_attempt(self, attempt_id, task_id=None):
+        task_attempt = proto_utils.create_task_attempt_id_proto(attempt_id=attempt_id, task_id=task_id)
+        response = self._killTaskAttempt(task_attempt_id=task_attempt)
+
+    def kill_job(self, job_id, app_id=None):
+        job = proto_utils.create_jobid_proto(job_id=job_id,app_id=app_id)
+        response = self._killJob(job_id=job)
+
+    def kill_task(self, task_id, job_id=None, task_type=None):
+        task = proto_utils.create_taskid_proto(task_id=task_id, task_type=task_type, job_id=job_id)
+        response = self._killTask(task_id=task)
+
+    ''' Diagnostics Functions '''
+
+    def get_diagnostics(self, attempt_id, task_id=None):
+        task_attempt = proto_utils.create_task_attempt_id_proto(attempt_id=attempt_id, task_id=task_id)
+        response = self._getDiagnostics(task_attempt_id=task_attempt)
+        if response:
+            return [ json_format.MessageToDict(diagnostic) for diagnostic in response.diagnostics ]
+        else:
+            return []
+
+    def get_task_attempt_completion_events(self, job_id, from_event_id=None, max_events=None):
+        if job_id:
+            if not isinstance(job_id, mr_protos.JobIdProto):
+                raise YarnError("job_id need to be of type JobIdProto.")
+        response = self._getTaskAttemptCompletionEvents(job_id=job_id, from_event_id=from_event_id, max_events=max_events)
+        if response:
+            return json_format.MessageToDict(response)
+        else:
+            return {}
+
+    def get_counters(self, job_id, app_id=None):
+        job = proto_utils.create_jobid_proto(job_id=job_id,app_id=app_id)
+        response = self._getCounters(job_id=job)
+        if response:
+            return json_format.MessageToDict(response)
+        else:
+            return {}
+
+    def get_job_report(self, job_id=None, app_id=None):
+        job = proto_utils.create_jobid_proto(job_id=job_id,app_id=app_id)
+        response = self._getJobReport(job_id=job)
+        if response:
+            return json_format.MessageToDict(response)
+        else:
+            return {}
+
+    def get_task_report(self, task_id, job_id=None, task_type=None):
+        task = proto_utils.create_taskid_proto(task_id=task_id, task_type=task_type, job_id=job_id)
+        response = self._getTaskReport(task_id=task)
+        if response:
+            return json_format.MessageToDict(response)
+        else:
+            return {}
+
+    def get_task_reports(self, job_id, task_type=None):
+        if job_id:
+            if not isinstance(job_id, mr_protos.JobIdProto):
+                raise YarnError("job_id need to be of type JobIdProto.")
+        if task_type:
+            if not isinstance(task_type, proto_utils.TASKTYPE):
+                raise YarnError("task_type need to be of type TASKTYPE.")
+        response = self._getTaskReports(job_id=job_id, task_type=task_type)
+        if response:
+            return [ json_format.MessageToDict(report) for report in response.task_reports ]
+        else:
+            return []
+
+    def get_task_attempt_report(self, attempt_id, task_id=None):
+        task_attempt = proto_utils.create_task_attempt_id_proto(attempt_id=attempt_id, task_id=task_id)
+        response = self._getTaskAttemptReport(task_attempt_id=task_attempt)
+        if response:
+            return json_format.MessageToDict(response)
+        else:
+            return {}
+
+    ''' Token Functions '''
+
+    def get_delegation_token(self, renewer=None):
+        response = self._getDelegationToken(renewer=renewer)
+        if response:
+            return json_format.MessageToDict(response)
+        else:
+            return {}
+
+    def renew_delegation_token(self, token):
+        if not isinstance(token, security_protocol.TokenProto):
+            raise YarnError("token need to be of type TokenProto.")
+        response = self._renewDelegationToken(token=token)
+        if response:
+            return json_format.MessageToDict(response)
+        else:
+            return {}
+
+    def cancel_delegation_token(self, token):
+        if not isinstance(token, security_protocol.TokenProto):
+            raise YarnError("token need to be of type TokenProto.")
+        response = self._cancelDelegationToken(token=token)
+        return True
+
+class YarnHistoryServerClient(YarnClient):
+    """
+      Yarn History Server applications client. Requires the timeline server to be setup.
+    """
+
+    #service_protocol = "org.apache.hadoop.yarn.api.ApplicationHistoryProtocolPB"
     service_protocol = "org.apache.hadoop.yarn.api.ApplicationHistoryProtocol"
     service_stub = application_history_client_protocol.ApplicationHistoryProtocolService_Stub
 

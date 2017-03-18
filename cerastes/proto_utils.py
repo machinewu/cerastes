@@ -8,6 +8,8 @@ import cerastes.protobuf.yarn_protos_pb2 as yarn_protos
 import cerastes.protobuf.HAServiceProtocol_pb2 as ha_protocol
 import cerastes.protobuf.Security_pb2 as security_protocol
 import cerastes.protobuf.application_history_client_pb2 as application_history_client_protocol
+import cerastes.protobuf.MRClientProtocol_pb2 as mr_client_protocol
+import cerastes.protobuf.mr_protos_pb2 as mr_protos
 
 from cerastes.errors import RpcError, YarnError, AuthorizationException, StandbyError 
 from cerastes.controller import SocketRpcController
@@ -37,18 +39,18 @@ class APPLICATION_SCOPE(IntEnum):
     OWN = yarn_service_protos.OWN
 
 class LOCAL_RESOURCE_TYPE(IntEnum):
-    ARCHIVE = yarn_service_protos.ARCHIVE
-    FILE = yarn_service_protos.FILE
-    PATTERN = yarn_service_protos.PATTERN
+    ARCHIVE = yarn_protos.ARCHIVE
+    FILE = yarn_protos.FILE
+    PATTERN = yarn_protos.PATTERN
 
 class LOCAL_RESOURCE_VISIBILITY(IntEnum):
-    PUBLIC = yarn_service_protos.PUBLIC
-    PRIVATE = yarn_service_protos.PRIVATE
-    APPLICATION = yarn_service_protos.APPLICATION
+    PUBLIC = yarn_protos.PUBLIC
+    PRIVATE = yarn_protos.PRIVATE
+    APPLICATION = yarn_protos.APPLICATION
 
 class APPLICATION_ACCESS_TYPE(IntEnum):
-    APPACCESS_VIEW_APP = yarn_service_protos.APPACCESS_VIEW_APP
-    APPACCESS_MODIFY_APP = yarn_service_protos.APPACCESS_MODIFY_APP
+    APPACCESS_VIEW_APP = yarn_protos.APPACCESS_VIEW_APP
+    APPACCESS_MODIFY_APP = yarn_protos.APPACCESS_MODIFY_APP
 
 class NODE_STATES(IntEnum):
     NS_NEW = yarn_protos.NS_NEW
@@ -64,6 +66,33 @@ class RESERVATION_REQUEST_INTERPRETER(IntEnum):
     R_ORDER = yarn_protos.R_ORDER
     R_ORDER_NO_GAP = yarn_protos.R_ORDER_NO_GAP
 
+class TASKTYPE(IntEnum):
+    MAP = mr_protos.MAP
+    REDUCE = mr_protos.REDUCE
+
+def create_jobid_proto(job_id, app_id=None):
+    if app_id:
+        if not isinstance(app_id, yarn_protos.ApplicationIdProto):
+            app_id = create_applicationid_proto(id=app_id)
+    return  mr_protos.JobIdProto(id=job_id, app_id=app_id)
+
+def create_taskid_proto(task_id, task_type=None, job_id=None):
+    if job_id:
+        if not isinstance(job_id, mr_protos.JobIdProto):
+            raise YarnError("job_id need to be of type JobIdProto.")
+
+    if task_type:
+        if not isinstance(task_type, TASKTYPE):
+            raise YarnError("task_type need to be of type TASKTYPE.")
+
+    return  mr_protos.TaskIdProto(id=task_id, job_id=job_id, task_type=task_type)
+
+def create_task_attempt_id_proto(attempt_id, task_id=None):
+    if task_id:
+        if not isinstance(task_id, mr_protos.TaskIdProto):
+            raise YarnError("task_id need to be of type TaskIdProto.")
+
+    return  mr_protos.TaskAttemptIdProto(id=attempt_id, task_id=task_id)
 
 def create_local_resource_proto( key=None, scheme=None, 
                                  host=None, port=None, resource_file=None,
@@ -74,7 +103,7 @@ def create_local_resource_proto( key=None, scheme=None,
     if recource_type:
         if not isinstance(recource_type, LOCAL_RESOURCE_TYPE):
             raise YarnError("recource_type need to be of type LOCAL_RESOURCE_TYPE.")
-    if :
+    if visibility:
         if not isinstance(visibility, LOCAL_RESOURCE_VISIBILITY):
             raise YarnError("visibility need to be of type LOCAL_RESOURCE_VISIBILITY.")
     local_resource = yarn_protos.LocalResourceProto(resource=resource, size=size, timestamp=timestamp, type=recource_type, visibility=visibility, pattern=pattern)
