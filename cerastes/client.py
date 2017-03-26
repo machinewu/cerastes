@@ -11,6 +11,8 @@ import cerastes.protobuf.application_history_client_pb2 as application_history_c
 import cerastes.protobuf.MRClientProtocol_pb2 as mr_client_protocol
 import cerastes.protobuf.HSAdminRefreshProtocol_pb2 as hs_admin_protocol
 import cerastes.protobuf.mr_protos_pb2 as mr_protos
+import cerastes.protobuf.applicationmaster_protocol_pb2 as applicationmaster_protocol
+import cerastes.protobuf.containermanagement_protocol_pb2 as container_management_protocol
 import cerastes.proto_utils as proto_utils
 
 from cerastes.errors import RpcError, YarnError, AuthorizationException, StandbyError 
@@ -729,8 +731,9 @@ class YarnHistoryServerClient(YarnClient):
 
 class YarnRMApplicationClient(YarnFailoverClient):
     """
-      Yarn Resource Manager applications client.
-      Typically on port 8032.
+      Client<-->ResourceManager
+      Implements the protocol between clients and the ResourceManager to submit/abort jobs
+      and to get information on applications, cluster metrics, nodes, queues and ACLs. 
     """
 
     service_protocol = "org.apache.hadoop.yarn.api.ApplicationClientProtocolPB"
@@ -766,6 +769,27 @@ class YarnRMApplicationClient(YarnFailoverClient):
                            keep_containers_across_application_attempts=False, applicationTags=None,
                            attempt_failures_validity_interval=1, log_aggregation_context=None,
                            reservation_id=None, node_label_expression=None, am_container_resource_request=None):
+        '''
+          The interface used by clients to submit a new application to the ResourceManager.
+          The client is required to provide details such as queue, Resource required to run the ApplicationMaster, 
+          the equivalent of ContainerLaunchContext for launching the ApplicationMaster etc. via the SubmitApplicationRequest.
+
+          Currently the ResourceManager sends an immediate (empty) SubmitApplicationResponse on accepting the submission and throws 
+          an exception if it rejects the submission. However, this call needs to be followed by getApplicationReport(GetApplicationReportRequest)
+          to make sure that the application gets properly submitted - obtaining a SubmitApplicationResponse from ResourceManager doesn't guarantee
+          that RM 'remembers' this application beyond failover or restart. If RM failover or RM restart happens before ResourceManager saves the
+          application's state successfully, the subsequent getApplicationReport(GetApplicationReportRequest) will throw a ApplicationNotFoundException.
+          The Clients need to re-submit the application with the same ApplicationSubmissionContext when it encounters the ApplicationNotFoundException
+          on the getApplicationReport(GetApplicationReportRequest) call.
+
+          During the submission process, it checks whether the application already exists. If the application exists, it will simply return
+          SubmitApplicationResponse.
+
+          In secure mode,the <code>ResourceManager</code> verifies access to queues etc. before accepting the application submission.
+
+          @param request request to submit a new application
+          @return (empty) response on accepting the submission
+        '''
 
         if priority:
             if not isinstance(priority, yarn_protos.PriorityProto):
@@ -832,6 +856,13 @@ class YarnRMApplicationClient(YarnFailoverClient):
         return True  
 
     def move_application_across_queues(self, application_id, target_queue):
+        '''
+           Move an application to a new queue. 
+           @param application_id: the application ID
+           @param target_queue: the target queue
+           @return an empty response
+        '''
+
         if not isinstance(application_id, yarn_protos.ApplicationIdProto):
             application_id = proto_utils.create_applicationid_proto(id=application_id)
         response = self._moveApplicationAcrossQueues(application_id=application_id, target_queue=target_queue)
@@ -872,6 +903,30 @@ class YarnRMApplicationClient(YarnFailoverClient):
             return []
 
     def submit_reservation(self, reservation_resources=None, arrival=None, deadline=None, reservation_name=None, queue=None, interpreter=None):
+        '''
+          The interface used by clients to submit a new reservation to the ResourceManager.
+
+          The client packages all details of its request in a ReservationSubmissionRequest object.
+          This contains information about the amount of capacity, temporal constraints, and concurrency needs.
+          Furthermore, the reservation might be composed of multiple stages, with ordering dependencies among them.
+
+          In order to respond, a new admission control component in the ResourceManager performs an analysis of
+          the resources that have been committed over the period of time the user is requesting, verify that
+          the user requests can be fulfilled, and that it respect a sharing policy (e.g., CapacityOverTimePolicy).
+          Once it has positively determined that the ReservationSubmissionRequest is satisfiable the
+          ResourceManager answers with a ReservationSubmissionResponse that include a non-null ReservationId.
+
+          Upon failure to find a valid allocation the response is an exception with the reason.
+          On application submission the client can use this ReservationId to obtain access to the reserved resources.
+
+          The system guarantees that during the time-range specified by the user, the reservationID will be corresponding
+          to a valid reservation. The amount of capacity dedicated to such queue can vary overtime, depending of the
+          allocation that has been determined. But it is guaranteed to satisfy all the constraint expressed by the user in the
+          ReservationSubmissionRequest.
+
+          @param request the request to submit a new Reservation
+          @return response the ReservationId on accepting the submission
+        '''
         if reservation_resources:
             if type(reservation_resources) in (tuple, list):
                 for reservation in reservation_resources:
@@ -946,6 +1001,15 @@ class YarnRMApplicationClient(YarnFailoverClient):
             return {}
 
     def get_new_application(self):
+        '''
+          The interface used by clients to obtain a new ApplicationId for submitting new applications.
+          The ResourceManager responds with a new, monotonically increasing, ApplicationId which is used 
+          by the client to submit a new application.
+          The ResourceManager also responds with details such  as maximum resource capabilities in the cluster
+          as specified in GetNewApplicationResponse.
+
+          @return: response containing the new <code>ApplicationId</code> to be used to submit an application.
+        '''
         response = self._getNewApplication()
         if response:
             return json_format.MessageToDict(response)
@@ -1079,3 +1143,138 @@ class YarnRMApplicationClient(YarnFailoverClient):
             return [ json_format.MessageToDict(application) for application in response.applications ]
         else:
             return []
+
+class YarnApplicationMasterClient(YarnClient):
+    """
+      ApplicationMaster<-->ResourceManager
+      Yarn Application Master Resource Manager client. Implements the protocol between a live instance of ApplicationMaster
+      and the Resource Manager.
+      This is used by the ApplicationMaster to register/unregister and to request and obtain recources in the cluster from
+      the resource manager
+      RPC interface needed by the application Master
+      to request resources from the resource manager.
+    """
+
+    service_protocol = "org.apache.hadoop.yarn.api.ApplicationMasterProtocolPB"
+    service_stub = applicationmaster_protocol.ApplicationMasterProtocolService_Stub
+
+    _registerApplicationMaster = _RpcHandler( service_stub, service_protocol )
+    _finishApplicationMaster = _RpcHandler( service_stub, service_protocol )
+    _allocate = _RpcHandler( service_stub, service_protocol )
+
+    def register_application_master(self, host=None, rpc_port=None, tracking_url=None):
+        '''
+            The application master register itself with the resource manager once started.
+        '''
+        response = self._registerApplicationMaster(host=host, rpc_port=rpc_port, tracking_url=tracking_url)
+        if response:
+            return json_format.MessageToDict(response)
+        else:
+            return {}
+
+    def finish_application_master(self, diagnostics, tracking_url, final_application_status):
+        '''
+            The application master finish its execution.
+        '''
+        if final_application_status:
+            if not isinstance(final_application_status, proto_utils.FINAL_APPLICATION_STATUS):
+                raise YarnError("final_application_status need to be of type FINAL_APPLICATION_STATUS.")
+        response = self._finishApplicationMaster(diagnostics=diagnostics, tracking_url=tracking_url, final_application_status=final_application_status)
+        if response:
+            return json_format.MessageToDict(response.isUnregistered)
+        else:
+            return False
+
+    def allocate(self, ask, release, blacklist_request, response_id, progress, increase_request):
+        if ask:
+            if not isinstance(ask, yarn_protos.ResourceRequestProto):
+                raise YarnError("ask need to be of type ResourceRequestProto.")
+        if release:
+            if not isinstance(release, yarn_protos.ContainerIdProto):
+                raise YarnError("release need to be of type ContainerIdProto.")
+        if blacklist_request:
+            if not isinstance(blacklist_request, yarn_protos.ResourceBlacklistRequestProto):
+                raise YarnError("blacklist_request need to be of type ResourceBlacklistRequestProto.")
+        if increase_request:
+            if not isinstance(increase_request, yarn_protos.ContainerResourceIncreaseRequestProto):
+                raise YarnError("increase_request need to be of type ContainerResourceIncreaseRequestProto.")
+        response = self._allocate(ask=ask, release=release, blacklist_request=blacklist_request, response_id=response_id, progress=progress, increase_request=increase_request)
+        if response:
+            return json_format.MessageToDict(response)
+        else:
+            return False
+
+class YarnContainerManagerClient(YarnClient):
+    """
+     ApplicationMaster<-->NodeManager
+     Yarn Containers Management Client, implements the protocol between an ApplicationMaster and a NodeManager to 
+     start/stop and increase resource of containers and to get status of running containers.
+
+     In Yarn the ResourceManager hands off control of assigned NodeManagers to the ApplicationMaster.
+     The ApplicationMaster independently contact its assigned node managers and provide them with a Container Launch Context 
+     that includes environment variables, dependencies located in remote storage, security tokens, and commands needed to start the actual process.
+
+     If security is enabled the NodeManager verifies that the ApplicationMaster has truly been allocated the container
+     by the ResourceManager and also verifies all interactions such as stopping the container or obtaining status information for the container.
+    """
+
+    service_protocol = "org.apache.hadoop.yarn.api.ContainerManagementProtocolPB"
+    service_stub = container_management_protocol.ContainerManagementProtocolService_Stub
+
+    _startContainers = _RpcHandler( service_stub, service_protocol )
+    _stopContainers = _RpcHandler( service_stub, service_protocol )
+    _getContainerStatuses = _RpcHandler( service_stub, service_protocol )
+
+    def start_containers(self, start_container_request):
+        if start_container_request:
+            if type(start_container_request) in (tuple, list):
+                for request in start_container_request:
+                   if not isinstance(request, yarn_service_protos.StartContainerRequestProto):
+                      raise YarnError("start_container_request need to be a list of Type StartContainerRequestProto.")
+            else:
+                if isinstance(start_container_request, yarn_service_protos.StartContainerRequestProto):
+                    start_container_request = [start_container_request]
+                else:
+                    raise YarnError("start_container_request need to be a list of Type StartContainerRequestProto.")
+
+        response = self._startContainers(start_container_request=start_container_request)
+        if response:
+            return json_format.MessageToDict(response)
+        else:
+            return {}
+
+    def stop_containers(self,container_id):
+        if container_id:
+            if type(container_id) in (tuple, list):
+                for container in container_id:
+                   if not isinstance(container, yarn_protos.ContainerIdProto):
+                      raise YarnError("container_id need to be a list of Type ContainerIdProto.")
+            else:
+                if isinstance(container_id, yarn_protos.ContainerIdProto):
+                    container_id = [container_id]
+                else:
+                    raise YarnError("container_id need to be a list of Type ContainerIdProto.")
+    
+        response = self._stopContainers(container_id=container_id)
+        if response:
+            return json_format.MessageToDict(response)
+        else:
+            return {}
+
+    def get_container_statuses(self,container_id):
+        if container_id:
+            if type(container_id) in (tuple, list):
+                for container in container_id:
+                   if not isinstance(container, yarn_protos.ContainerIdProto):
+                      raise YarnError("container_id need to be a list of Type ContainerIdProto.")
+            else:
+                if isinstance(container_id, yarn_protos.ContainerIdProto):
+                    container_id = [container_id]
+                else:
+                    raise YarnError("container_id need to be a list of Type ContainerIdProto.")
+    
+        response = self._getContainerStatuses(container_id=container_id)
+        if response:
+            return json_format.MessageToDict(response)
+        else:
+            return {}

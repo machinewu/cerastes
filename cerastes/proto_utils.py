@@ -66,6 +66,12 @@ class RESERVATION_REQUEST_INTERPRETER(IntEnum):
     R_ORDER = yarn_protos.R_ORDER
     R_ORDER_NO_GAP = yarn_protos.R_ORDER_NO_GAP
 
+class FINAL_APPLICATION_STATUS(IntEnum):
+    APP_UNDEFINED = yarn_protos.APP_UNDEFINED
+    APP_SUCCEEDED = yarn_protos.APP_SUCCEEDED
+    APP_FAILED = yarn_protos.APP_FAILED
+    APP_KILLED = yarn_protos.APP_KILLED
+
 class TASKTYPE(IntEnum):
     MAP = mr_protos.MAP
     REDUCE = mr_protos.REDUCE
@@ -214,6 +220,18 @@ def create_application_attempt_id_proto(application_id=None, attemptId=None):
             application_id = create_applicationid_proto(id=application_id)
     return yarn_protos.ApplicationAttemptIdProto(application_id=application_id, attemptId=attemptId)
 
+def create_resource_blacklist_request_proto(blacklist_additions=None, blacklist_removals=None):
+    return  yarn_protos.ResourceBlacklistRequestProto(blacklist_additions=blacklist_additions, blacklist_removals=blacklist_removals)
+
+def create_container_resource_increase_request_proto(container_id=None, capability=None):
+    if capability:
+        if not isinstance(capability, yarn_protos.ResourceProto):
+            raise YarnError("capability need to be of type ResourceProto.")
+    if container_id:
+        if not isinstance(container_id, yarn_protos.ContainerIdProto):
+            raise YarnError("container_id need to be of type ContainerIdProto.")
+    return  yarn_protos.ContainerResourceIncreaseRequestProto(container_id=container_id, capability=capability)
+
 def create_containerid_proto(app_id, app_attempt_id, container_id):
     if app_id:
         if not isinstance(app_id, yarn_protos.ApplicationIdProto):
@@ -222,6 +240,16 @@ def create_containerid_proto(app_id, app_attempt_id, container_id):
         if not isinstance(app_attempt_id, yarn_protos.ApplicationAttemptIdProto):
             app_attempt_id = create_application_attempt_id_proto(application_id=app_id, attemptId=app_attempt_id)
     return  yarn_protos.ContainerIdProto(app_id=app_id, app_attempt_id=app_attempt_id, id=container_id)
+
+def create_start_container_request(container_launch_context,container_token):
+        if container_launch_context:
+            if not isinstance(container_launch_context, yarn_protos.ContainerLaunchContextProto):
+                raise YarnError("container_launch_context need to be of type ContainerLaunchContextProto.")
+        if container_token:
+            if not isinstance(container_token, security_protocol.TokenProto):
+                raise YarnError("container_token need to be of type TokenProto.")
+
+        return yarn_service_protos.StartContainerRequestProto(container_launch_context=container_launch_context, container_token=container_token)
 
 def create_container_resource_request(priority, resource_name, capability, num_containers, relax_locality, node_label_expression):
     priority_proto = yarn_protos.PriorityProto(priority=priority)
