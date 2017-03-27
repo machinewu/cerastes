@@ -50,6 +50,7 @@ setup(
   ],
   install_requires=[
     'protobuf>2.4.1',
+    'jsonschema>2.0',
     'python-krbV',
     'sasl',
     'six',

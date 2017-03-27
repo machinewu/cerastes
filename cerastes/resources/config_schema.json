@@ -1,0 +1,122 @@
+{
+  "properties": {
+    "clusters": {
+      "items": {
+        "properties": {
+          "effective_user": {
+            "type": "string"
+          },
+          "mapreduce_jobhistory": {
+            "properties": {
+              "administration_port": {
+                "type": "integer"
+              },
+              "application_port": {
+                "type": "integer"
+              },
+              "hostname": {
+                "type": "string"
+              }
+            },
+            "type": "object",
+            "required": [
+              "hostname",
+              "application_port",
+              "administration_port"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "resourcemanagers": {
+            "items": {
+              "properties": {
+                "administration_port": {
+                  "type": "integer"
+                },
+                "application_port": {
+                  "type": "integer"
+                },
+                "hostname": {
+                  "type": "string"
+                }
+              },
+              "type": "object",
+              "required": [
+                "hostname",
+                "application_port",
+                "administration_port"
+              ]
+            },
+            "type": "array"
+          },
+          "version": {
+            "type": "integer"
+          },
+          "rm_ha_enabled": {
+            "type": "boolean"
+          },
+          "sock_connect_timeout": {
+            "type": "integer"
+          },
+          "sock_request_timeout": {
+            "type": "integer"
+          },
+          "timeline_server": {
+            "properties": {
+              "hostname": {
+                "type": "string"
+              },
+              "port": {
+                "type": "integer"
+              }
+            },
+            "type": "object",
+            "required": [
+              "hostname",
+              "port"
+            ]
+          },
+          "use_sasl": {
+            "type": "boolean"
+          },
+          "yarn_rm_principal": {
+            "type": "string"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ]
+      },
+      "type": "array"
+    },
+    "configuration": {
+      "properties": {
+        "logging": {
+          "properties": {
+            "disable": {
+              "type": "boolean"
+            },
+            "level": {
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            }
+          },
+          "type": "object",
+          "required": [
+            "path",
+            "level"
+          ]
+        }
+      },
+      "type": "object"
+    }
+  },
+  "type": "object",
+  "required": [
+    "clusters"
+  ]
+}

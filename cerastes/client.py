@@ -99,8 +99,9 @@ class _ClientType(ABCMeta):
 @add_metaclass(_ClientType)
 class YarnClient(object):
     """
-     Abstract Yarn Client. A Client is defined by a service endpoint, not by a physical service, which means
-     if a service implements multiple endpoints, each one will be handled by a separate client.
+     Abstract RPC Client
+     An Abstract implementation of an RPC service client. A client is defined by a protocol, a stub class
+     and a set of wrapper functions around the protocol methods.
     """
 
     def __init__(self, host, port, version=DEFAULT_YARN_PROTOCOL_VERSION, effective_user=None, use_sasl=False, yarn_rm_principal=None,
@@ -199,10 +200,16 @@ class YarnFailoverClient(YarnClient):
         raise StandbyError('Could not find any active host.')
 
 class YarnAdminClient(YarnClient):
-    """
-      Yarn Resource Manager administration client.
-      Typically on port 8033.
-    """
+    '''
+      Yarn Resource Manager administration client. Implements the list of tasks that need to be performed by Yarn
+      Cluster administrator.
+      
+      Administration Tasks are implemented in Yarn via a separate interface, this is to make sure that
+      administration requests don’t get starved by the regular users’ requests and to give the operators’ commands
+      a higher priority.
+      
+      The Yarn administration port is typically 8033.
+    '''
 
     service_protocol = "org.apache.hadoop.yarn.server.api.ResourceManagerAdministrationProtocolPB"
     service_stub = rm_protocol.ResourceManagerAdministrationProtocolService_Stub
@@ -412,7 +419,7 @@ class YarnAdminHAClient(YarnAdminClient):
         response =  executor(active_client.service, controller, request)
         return response
 
-class HSAdminClient(YarnClient):
+class MRAdminClient(YarnClient):
 
     service_protocol = "org.apache.hadoop.mapreduce.v2.api.HSAdminRefreshProtocol"
     service_stub = hs_admin_protocol.HSAdminRefreshProtocolService_Stub
