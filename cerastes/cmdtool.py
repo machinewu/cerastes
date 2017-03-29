@@ -8,7 +8,9 @@ Usage:
   cerastes mradmin -c CLUSTER [-v...]
   cerastes mrclient -c CLUSTER [-v...]
   cerastes history -c CLUSTER [-v...]
-  cerastes -V | -h
+  cerastes --version
+  cerastes -h | --help
+  cerastes -l | --log
 Commands:
   rmadmin                       Start a resource manager admin interactive
                                 shell via the python interpreter. Perform
@@ -26,8 +28,9 @@ Commands:
                                 This centralizes all informations about yarn applications
                                 history.
 Options:
-  -L --log                      Show path to current log file and exit.
-  -V --version                  Show version and exit.
+  --version                     Show version and exit.
+  -h --help                     Show this screen.
+  -l --log                      Show path to current log file and exit.
   -c CLUSTER                    The name of the cluster to use.
   -v --verbose                  Enable log output. Can be specified up to three
                                 times (increasing verbosity each time).
@@ -39,7 +42,7 @@ Cerastes exits with return status 1 if an error occurred and 0 otherwise.
 """
 
 from . import __version__
-from cerastes.config import CerastesConfig
+from cerastes.config import CerastesConfig, NullHandler
 from cerastes.client import YarnRmanAdminClient, YarnRmanApplicationClient, MrAdminClient, MrClient, YarnHistoryServerClient
 from docopt import docopt
 from threading import Lock
@@ -77,6 +80,7 @@ def configure_client(args, client_class):
 
   # configure file logging if applicable
   handler = config.get_log_handler()
+
   logger.addHandler(handler)
 
   return config.get_client(args['-c'],client_class)
@@ -87,6 +91,19 @@ def main(argv=None, client=None):
   :param client: For testing.
   """
   args = docopt(__doc__, argv=argv, version=__version__)
+
+  # configure file logging if applicable
+
+  if args['--log']:
+    config = CerastesConfig()
+    handler = config.get_log_handler()
+    if isinstance(handler, NullHandler):
+      sys.stdout.write('No log file active.\n')
+      sys.exit(1)
+    else:
+      sys.stdout.write('%s\n' % (handler.baseFilename, ))
+      sys.exit(0)
+
   if args['rmadmin']:
     client = configure_client(args, YarnRmanAdminClient)
     class_name = "RM ADMIN"

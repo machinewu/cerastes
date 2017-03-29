@@ -19,6 +19,11 @@ import json
 
 _logger = lg.getLogger(__name__)
 
+class NullHandler(lg.Handler):
+  """Pass-through logging handler.
+  This is required for python <2.7.
+  """
+
 class CerastesConfig(object):
 
   default_path = osp.expanduser('~/.cerastes.cfg')
@@ -46,7 +51,7 @@ class CerastesConfig(object):
 
   def get_log_handler(self):
       """Configure and return file logging handler."""
-      path = osp.join(gettempdir(), 'cerastes.log')
+      path = osp.join(osp.expanduser("~"), 'cerastes.log')
       level = lg.DEBUG
       
       if 'configuration' in self.config:
