@@ -36,6 +36,7 @@ import socket
 import os
 import math
 import pwd
+import binascii
 
 # Third party imports
 from google.protobuf.service import RpcChannel

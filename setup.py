@@ -49,10 +49,14 @@ setup(
     'Programming Language :: Python :: 3.4',
   ],
   install_requires=[
+    'docopt',
     'protobuf>2.4.1',
     'jsonschema>2.0',
     'python-krbV',
     'sasl',
     'six',
   ],
+  entry_points={'console_scripts': 
+     [ 'cerastes = cerastes.cmdtool:main' ]
+  },
 )
