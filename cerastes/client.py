@@ -1,4 +1,5 @@
 #!/usr/bin/python
+# -*- coding: utf-8 -*-
 
 import cerastes.protobuf.resourcemanager_administration_protocol_pb2 as rm_protocol
 import cerastes.protobuf.yarn_server_resourcemanager_service_protos_pb2 as yarn_rm_service_protos
@@ -15,7 +16,7 @@ import cerastes.protobuf.applicationmaster_protocol_pb2 as applicationmaster_pro
 import cerastes.protobuf.containermanagement_protocol_pb2 as container_management_protocol
 import cerastes.proto_utils as proto_utils
 
-from cerastes.errors import RpcError, YarnError, AuthorizationException, StandbyError 
+from cerastes.errors import RpcError, YarnError, AuthorizationException, StandbyError
 from cerastes.controller import SocketRpcController
 from cerastes.channel import SocketRpcChannel
 from cerastes.utils import SyncServicesList
@@ -31,6 +32,55 @@ import logging as lg
 
 log = lg.getLogger(__name__)
 DEFAULT_YARN_PROTOCOL_VERSION=9
+
+class YarnConfig(object):
+
+    @classmethod
+    def from_json(cls, config):
+        return self.__class__(**config)
+
+    def __init__(  self, name, resourcemanagers=None, mapreduce_jobhistory=None, timeline_server=None,
+                   rm_ha_enabled=False, version=DEFAULT_YARN_PROTOCOL_VERSION, effective_user=None,
+                   use_sasl=False, yarn_rm_principal=None, sock_connect_timeout=10000, sock_request_timeout=10000 ):
+
+      self.name = name
+
+      if resourcemanagers:
+          for resourcemanager in resourcemanagers:
+            if ("hostname" not in resourcemanager) or ("administration_port" not in resourcemanager) or ("application_port" not in resourcemanager):
+              raise YarnError("Wrong resourcemanagers configuration")
+            else:
+              self.resourcemanagers = resourcemanagers
+      if mapreduce_jobhistory:
+          if ("hostname" not in mapreduce_jobhistory) or ("administration_port" not in mapreduce_jobhistory) or ("application_port" not in mapreduce_jobhistory):
+              raise YarnError("Wrong mapreduce_jobhistory configuration")
+          else:
+              self.mapreduce_jobhistory = mapreduce_jobhistory
+
+      if timeline_server:
+          if ("hostname" not in timeline_server) or ("port" not in timeline_server):
+              raise YarnError("Wrong timeline_server configuration")
+          else:
+              self.timeline_server = timeline_server
+
+      if rm_ha_enabled == False:
+          if resourcemanagers and len(resourcemanagers) > 1:
+            self.rm_ha_enabled = True
+          else:
+            self.rm_ha_enabled = False
+      else:
+          self.rm_ha_enabled = rm_ha_enabled
+
+      if version < 9:
+          raise YarnError("Only protocol versions >= 9 supported")
+      else:
+          self.version = version
+
+      self.effective_user = effective_user
+      self.use_sasl = use_sasl
+      self.yarn_rm_principal = yarn_rm_principal
+      self.sock_connect_timeout = sock_connect_timeout
+      self.sock_request_timeout = sock_request_timeout
 
 class _RpcHandler(object):
 
@@ -51,24 +101,11 @@ class _RpcHandler(object):
         rpc_executor = self.service_stub_class.__dict__[self.method_desc.name]
         controller = SocketRpcController()
         req_class = reflection.MakeClass(self.method_desc.input_type)
- 
+
         try:
             request = req_class(**params)
         except AttributeError as ex:
             raise YarnError("Error creating Request class %s : %s" % (req_class, str(ex)))
-
-        '''
-        request = req_class()
-        for key in params:
-            # Assignment to repeated fields not allowed, need to extend
-            if isinstance(params[key], list):
-                getattr(request, key).extend(params[key])
-            else:
-                try:
-                    setattr(request, key, params[key])
-                except AttributeError as ex:
-                    raise YarnError("Error initializing Request class %s attribute %s : %s" % (req_class, key, str(ex)))
-        '''
 
         try:
             response = client._call(rpc_executor, controller, request)
@@ -80,8 +117,8 @@ class _RpcHandler(object):
             elif "StandbyException" in " ".join([e.class_name, e.message]):
                 raise StandbyError(str(e))
             else:
-                raise YarnError(str(e)) 
-    
+                raise YarnError(str(e))
+
     return rpc_handler
 
 # Thanks Matt for the nice piece of code
@@ -97,7 +134,7 @@ class _ClientType(ABCMeta):
 
 # for python 2 and 3 compatibility
 @add_metaclass(_ClientType)
-class YarnClient(object):
+class RpcClient(object):
     """
      Abstract RPC Client
      An Abstract implementation of an RPC service client. A client is defined by a protocol, a stub class
@@ -114,9 +151,6 @@ class YarnClient(object):
         :param version: What hadoop protocol version should be used (default: 9)
         :type version: int
         '''
-        if version < 9:
-            raise YarnError("Only protocol versions >= 9 supported")
-
         self.host = host
         self.port = port
 
@@ -135,17 +169,15 @@ class YarnClient(object):
         response =  executor(self.service, controller, request)
         return response
 
-class YarnFailoverClient(YarnClient):
+class RpcFailoverClient(RpcClient):
     """
-     Abstract Yarn Failover Client. This client attempts requests to a service until a standby error is
-     received then switch to the second service.
+     Abstract Yarn Failover Client.
+     This client attempts requests to a service until a standby error is received
+     then switch to the second service.
     """
 
     def __init__(self, services, version=DEFAULT_YARN_PROTOCOL_VERSION, effective_user=None, use_sasl=False, yarn_rm_principal=None,
                  sock_connect_timeout=10000, sock_request_timeout=10000):
-
-        if version < 9:
-            raise YarnError("Only protocol versions >= 9 supported")
 
         self.services = services
         self.sync_hosts_list = SyncServicesList(services)
@@ -171,7 +203,7 @@ class YarnFailoverClient(YarnClient):
                                    sock_request_timeout=self.sock_request_timeout)
 
         return self.service_stub(channel)
-    
+
     # called on standby exception
     def switch_active_service(self):
         # find the next service
@@ -189,25 +221,24 @@ class YarnFailoverClient(YarnClient):
           try:
             response =  executor(self.service, controller, request)
             return response
-          except RpcError as e:
-            if "StandbyException" in " ".join([e.class_name, e.message]):
-                self.switch_active_service()
-                attempt += 1
-                pass
-            else:
-                raise e
+          except RpcError:
+              self.switch_active_service()
+              attempt += 1
+              pass
+          except:
+                raise
 
         raise StandbyError('Could not find any active host.')
 
-class YarnAdminClient(YarnClient):
+class RpcRmanAdminClient(RpcClient):
     '''
       Yarn Resource Manager administration client. Implements the list of tasks that need to be performed by Yarn
       Cluster administrator.
-      
+
       Administration Tasks are implemented in Yarn via a separate interface, this is to make sure that
       administration requests don’t get starved by the regular users’ requests and to give the operators’ commands
       a higher priority.
-      
+
       The Yarn administration port is typically 8033.
     '''
 
@@ -276,13 +307,13 @@ class YarnAdminClient(YarnClient):
         else:
             return []
 
-class YarnHARMClient(YarnClient):
+class RpcHAClient(RpcClient):
 
     service_protocol = "org.apache.hadoop.ha.HAServiceProtocol"
     service_stub = ha_protocol.HAServiceProtocolService_Stub
 
     _getServiceStatus = _RpcHandler( service_stub, service_protocol )
-    _monitorHealth = _RpcHandler( service_stub, service_protocol ) 
+    _monitorHealth = _RpcHandler( service_stub, service_protocol )
     _transitionToStandby = _RpcHandler( service_stub, service_protocol )
     _transitionToActive = _RpcHandler( service_stub, service_protocol )
 
@@ -319,93 +350,95 @@ class YarnHARMClient(YarnClient):
        response = self._transitionToActive(reqInfo=reqInfo)
        return True
 
-class YarnAdminHAClient(YarnAdminClient):
+class YarnRmanAdminClient(RpcRmanAdminClient):
     """
       Yarn Resource Manager HA Administration client.
     """
-    def __init__(self, services, version=DEFAULT_YARN_PROTOCOL_VERSION, effective_user=None, use_sasl=False, yarn_rm_principal=None,
-                 sock_connect_timeout=10000, sock_request_timeout=10000):
 
-        if version < 9:
-            raise YarnError("Only protocol versions >= 9 supported")
+    class AdminHaServices(object):
+        
+        def __init__(self, config):
+            self.services_map = []
+            for resourcemanager in config.resourcemanagers:
+                self.services_map.append({
+                      'host':       resourcemanager['hostname'],
+                      'client':     RpcRmanAdminClient( host=resourcemanager['hostname'], port=resourcemanager['administration_port'],
+                                                        version=config.version, effective_user=config.effective_user,
+                                                        use_sasl=config.use_sasl, yarn_rm_principal=config.yarn_rm_principal,
+                                                        sock_connect_timeout=config.sock_connect_timeout,
+                                                        sock_request_timeout=config.sock_request_timeout),
+                      'ha_client' : RpcHAClient( host=resourcemanager['hostname'], port=resourcemanager['administration_port'],
+                                                 version=config.version, effective_user=config.effective_user,
+                                                 use_sasl=config.use_sasl, yarn_rm_principal=config.yarn_rm_principal,
+                                                 sock_connect_timeout=config.sock_connect_timeout,
+                                                 sock_request_timeout=config.sock_request_timeout)
+                    })
 
-        if not isinstance(services, list):
-            raise YarnError("Yarn RM Admin Client is valid only when HA is active, services need to be a list of  rm host and port dicts")
-        elif len(services) != 2:
-            raise YarnError("Yarn RM Admin Client is valid only when HA is active, services need to be a list of two rm host and port dicts")
+        def get_active_rm_service(self):
+            if len(self.services_map) > 1:
+                for svr in self.services_map:
+                    if svr['ha_client'].get_service_status()['state'] == "ACTIVE":
+                        return svr
+                raise YarnError("Could not find any active RM server.")
+            elif len(self.services_map) == 1:
+                return self.services_map[0]
+            else:
+                raise YarnError("Invalid yarn resourcemanager configuration.")
 
-        self.rm_one_admin_client = YarnAdminClient( host=services[0]['host'], port=services[0]['port'], version=version,
-                                                    effective_user=effective_user,
-                                                    use_sasl=use_sasl, yarn_rm_principal=yarn_rm_principal,
-                                                    sock_connect_timeout=sock_connect_timeout,
-                                                    sock_request_timeout=sock_request_timeout)
+        def get_standby_rm_service(self):
+            if len(self.services_map) > 1:
+                for svr in self.services_map:
+                    if svr['ha_client'].get_service_status()['state'] == "STANDBY":
+                        return svr
+                raise YarnError("Could not find any active RM server.")
+            else:
+                raise YarnError("Standby is not defined for resource managers in non HA mode.")
 
-        self.rm_two_admin_client = YarnAdminClient( host=services[1]['host'], port=services[1]['port'], version=version,
-                                                    effective_user=effective_user,
-                                                    use_sasl=use_sasl, yarn_rm_principal=yarn_rm_principal,
-                                                    sock_connect_timeout=sock_connect_timeout,
-                                                    sock_request_timeout=sock_request_timeout)
 
-        self.rm_one_ha_client = YarnHARMClient( host=services[0]['host'], port=services[0]['port'], version=version,
-                                                effective_user=effective_user,
-                                                use_sasl=use_sasl, yarn_rm_principal=yarn_rm_principal,
-                                                sock_connect_timeout=sock_connect_timeout,
-                                                sock_request_timeout=sock_request_timeout)
-
-        self.rm_two_ha_client = YarnHARMClient( host=services[1]['host'], port=services[1]['port'], version=version,
-                                                effective_user=effective_user,
-                                                use_sasl=use_sasl, yarn_rm_principal=yarn_rm_principal,
-                                                sock_connect_timeout=sock_connect_timeout,
-                                                sock_request_timeout=sock_request_timeout)
-
-        self.services_map = [
-                             {
-                               'host': services[0]['host'],
-                               'port': services[0]['port'],
-                               'client': self.rm_one_admin_client,
-                               'ha_client': self.rm_one_ha_client
-                             },
-                             {
-                               'host': services[1]['host'],
-                               'port': services[1]['port'],
-                               'client': self.rm_two_admin_client,
-                               'ha_client': self.rm_two_ha_client
-                             }
-                            ]
-
-    def get_active_rm_service(self):
-        for svr in self.services_map:
-           if svr['ha_client'].get_service_status()['state'] == "ACTIVE":
-              return svr
-        raise YarnError("Could not find any active RM server.")
+    def __init__(self, config, **kwargs):
+        self.config = config
+        # set overwrite arguments            
+        for extra_option in kwargs:
+            setattr(self.config, extra_option, kwargs[extra_option])
+        #print self.config
+        self.rm_services =  self.AdminHaServices(self.config)
 
     def get_active_rm_host(self):
-        return self.get_active_rm_service()['host']
+        return self.rm_services.get_active_rm_service()['host']
 
     def get_active_rm_client(self):
-        return self.get_active_rm_service()['client']
+        return self.rm_services.get_active_rm_service()['client']
 
     def get_active_ha_handler(self):
-        return self.get_active_rm_service()['ha_client']
-
-    def get_standby_rm_service(self):
-        for svr in self.services_map:
-           if svr['ha_client'].get_service_status()['state'] == "STANDBY":
-              return svr
-        raise YarnError("Could not find any active RM server.")
+        if self.config.rm_ha_enabled:
+            return self.rm_services.get_active_rm_service()['ha_client']
+        else:
+            raise YarnError("HA Handler is not defined for resource managers in non HA mode.")
 
     def get_standby_rm_host(self):
-        return self.get_standby_rm_service()['host']
+        if self.config.rm_ha_enabled:
+            return self.rm_services.get_standby_rm_service()['host']
+        else:
+            raise YarnError("Standby is not defined for resource managers in non HA mode.")
 
     def get_standby_rm_client(self):
-        return self.get_standby_rm_service()['client']
+        if self.config.rm_ha_enabled:
+            return self.rm_services.get_standby_rm_service()['client']
+        else:
+            raise YarnError("Standby is not defined for resource managers in non HA mode.")
 
     def get_standby_ha_handler(self):
-        return self.get_standby_rm_service()['ha_client']
+        if self.config.rm_ha_enabled:
+            return self.rm_services.get_standby_rm_service()['ha_client']
+        else:
+            raise YarnError("Standby is not defined for resource managers in non HA mode.")
 
     def explicit_failover(self,force=False):
-        ha_sb_client = self.get_standby_rm_service()['ha_client']
-        ha_active_client = self.get_active_rm_service()['ha_client']
+        if not self.config.rm_ha_enabled:
+            raise YarnError("Failover is not defined for resource managers in non HA mode.")
+
+        ha_sb_client = self.rm_services.get_standby_rm_service()['ha_client']
+        ha_active_client = self.rm_services.get_active_rm_service()['ha_client']
         if force:
            state = YarnHARMClient.REQUEST_SOURCE.REQUEST_BY_USER_FORCED
         else:
@@ -419,7 +452,20 @@ class YarnAdminHAClient(YarnAdminClient):
         response =  executor(active_client.service, controller, request)
         return response
 
-class MRAdminClient(YarnClient):
+class MrAdminClient(RpcClient):
+
+    def __init__(self, config, **kwargs):
+        self.config = config
+        # set overwrite arguments            
+        for extra_option in kwargs:
+            setattr(self.config, extra_option, kwargs[extra_option])
+
+        super(MrAdminClient, self).__init__( host=self.config.mapreduce_jobhistory['hostname'],
+                                             port=self.config.mapreduce_jobhistory['administration_port'],
+                                             version=self.config.version, effective_user=self.config.effective_user,
+                                             use_sasl=self.config.use_sasl, yarn_rm_principal=self.config.yarn_rm_principal,
+                                             sock_connect_timeout=self.config.sock_connect_timeout,
+                                             sock_request_timeout=self.config.sock_request_timeout)  
 
     service_protocol = "org.apache.hadoop.mapreduce.v2.api.HSAdminRefreshProtocol"
     service_stub = hs_admin_protocol.HSAdminRefreshProtocolService_Stub
@@ -441,10 +487,23 @@ class MRAdminClient(YarnClient):
     def refresh_loaded_job_cache(self):
         response = self._refreshLoadedJobCache()
 
-class MRClient(YarnClient):
+class MrClient(RpcClient):
     """
       Client for the Map Reduce Job History server.
     """
+
+    def __init__(self, config, **kwargs):
+        self.config = config
+        # set overwrite arguments            
+        for extra_option in kwargs:
+            setattr(self.config, extra_option, kwargs[extra_option])
+
+        super(MrClient, self).__init__( host=self.config.mapreduce_jobhistory['hostname'],
+                                        port=self.config.mapreduce_jobhistory['application_port'],
+                                        version=self.config.version, effective_user=self.config.effective_user,
+                                        use_sasl=self.config.use_sasl, yarn_rm_principal=self.config.yarn_rm_principal,
+                                        sock_connect_timeout=self.config.sock_connect_timeout,
+                                        sock_request_timeout=self.config.sock_request_timeout) 
 
     service_protocol = "org.apache.hadoop.mapreduce.v2.api.HSClientProtocolPB"
     service_stub = mr_client_protocol.MRClientProtocolService_Stub
@@ -571,10 +630,23 @@ class MRClient(YarnClient):
         response = self._cancelDelegationToken(token=token)
         return True
 
-class YarnHistoryServerClient(YarnClient):
+class YarnHistoryServerClient(RpcClient):
     """
       Yarn History Server applications client. Requires the timeline server to be setup.
     """
+
+    def __init__(self, config, **kwargs):
+        self.config = config
+        # set overwrite arguments            
+        for extra_option in kwargs:
+            setattr(self.config, extra_option, kwargs[extra_option])
+
+        super(YarnHistoryServerClient, self).__init__( host=self.config.timeline_server['hostname'],
+                                                       port=self.config.timeline_server['port'],
+                                                       version=self.config.version, effective_user=self.config.effective_user,
+                                                       use_sasl=self.config.use_sasl, yarn_rm_principal=self.config.yarn_rm_principal,
+                                                       sock_connect_timeout=self.config.sock_connect_timeout,
+                                                       sock_request_timeout=self.config.sock_request_timeout) 
 
     #service_protocol = "org.apache.hadoop.yarn.api.ApplicationHistoryProtocolPB"
     service_protocol = "org.apache.hadoop.yarn.api.ApplicationHistoryProtocol"
@@ -728,20 +800,40 @@ class YarnHistoryServerClient(YarnClient):
         if response:
             return json_format.MessageToDict(response)
         else:
-            return {}  
+            return {}
 
     def cancel_delegation_token(self, token):
         if not isinstance(token, security_protocol.TokenProto):
             raise YarnError("token need to be of type TokenProto.")
         response = self._cancelDelegationToken(token=token)
-        return True  
+        return True
 
-class YarnRMApplicationClient(YarnFailoverClient):
+class YarnRmanApplicationClient(RpcFailoverClient):
     """
       Client<-->ResourceManager
       Implements the protocol between clients and the ResourceManager to submit/abort jobs
-      and to get information on applications, cluster metrics, nodes, queues and ACLs. 
+      and to get information on applications, cluster metrics, nodes, queues and ACLs.
+      
+      Note: The Application Client can not use the admin service to determine the active
+      resource manager since the latter require admin previlege to invoke getServiceStatus
+      and Application client does not require that kind of  previlege.
     """
+
+    def __init__(self, config, **kwargs):
+        self.config = config
+        # set overwrite arguments            
+        for extra_option in kwargs:
+            setattr(self.config, extra_option, kwargs[extra_option])
+
+        services = []
+        for resourcemanager in self.config.resourcemanagers:
+            services.append({'host': resourcemanager['hostname'],'port': resourcemanager['application_port']})
+
+        super(YarnRmanApplicationClient, self).__init__( services=services, version=self.config.version,
+                                                         effective_user=self.config.effective_user, use_sasl=self.config.use_sasl,
+                                                         yarn_rm_principal=self.config.yarn_rm_principal,
+                                                         sock_connect_timeout=self.config.sock_connect_timeout,
+                                                         sock_request_timeout=self.config.sock_request_timeout) 
 
     service_protocol = "org.apache.hadoop.yarn.api.ApplicationClientProtocolPB"
     service_stub = application_client_protocol.ApplicationClientProtocolService_Stub
@@ -778,10 +870,10 @@ class YarnRMApplicationClient(YarnFailoverClient):
                            reservation_id=None, node_label_expression=None, am_container_resource_request=None):
         '''
           The interface used by clients to submit a new application to the ResourceManager.
-          The client is required to provide details such as queue, Resource required to run the ApplicationMaster, 
+          The client is required to provide details such as queue, Resource required to run the ApplicationMaster,
           the equivalent of ContainerLaunchContext for launching the ApplicationMaster etc. via the SubmitApplicationRequest.
 
-          Currently the ResourceManager sends an immediate (empty) SubmitApplicationResponse on accepting the submission and throws 
+          Currently the ResourceManager sends an immediate (empty) SubmitApplicationResponse on accepting the submission and throws
           an exception if it rejects the submission. However, this call needs to be followed by getApplicationReport(GetApplicationReportRequest)
           to make sure that the application gets properly submitted - obtaining a SubmitApplicationResponse from ResourceManager doesn't guarantee
           that RM 'remembers' this application beyond failover or restart. If RM failover or RM restart happens before ResourceManager saves the
@@ -854,17 +946,17 @@ class YarnRMApplicationClient(YarnFailoverClient):
         if response:
             return json_format.MessageToDict(response)
         else:
-            return {}  
+            return {}
 
     def cancel_delegation_token(self, token):
         if not isinstance(token, security_protocol.TokenProto):
             raise YarnError("token need to be of type TokenProto.")
         response = self._cancelDelegationToken(token=token)
-        return True  
+        return True
 
     def move_application_across_queues(self, application_id, target_queue):
         '''
-           Move an application to a new queue. 
+           Move an application to a new queue.
            @param application_id: the application ID
            @param target_queue: the target queue
            @return an empty response
@@ -948,10 +1040,10 @@ class YarnRMApplicationClient(YarnFailoverClient):
         if interpreter:
             if not isinstance(interpreter, proto_utils.RESERVATION_REQUEST_INTERPRETER):
                 raise YarnError("interpreter need to be of type Enum RESERVATION_REQUEST_INTERPRETER.")
-        
+
         reservation_requests = yarn_protos.ReservationRequestsProto(reservation_resources=reservation_resources, interpreter=interpreter)
         reservation_definition = yarn_protos.ReservationDefinitionProto(reservation_requests=reservation_requests, arrival=arrival, deadline=deadline, reservation_name=reservation_name)
-        
+
         response = self._submitReservation(queue=queue, reservation_definition=reservation_definition)
 
         if response:
@@ -978,7 +1070,7 @@ class YarnRMApplicationClient(YarnFailoverClient):
         if interpreter:
             if not isinstance(interpreter, proto_utils.RESERVATION_REQUEST_INTERPRETER):
                 raise YarnError("interpreter need to be of type Enum RESERVATION_REQUEST_INTERPRETER.")
-        
+
         reservation_requests = yarn_protos.ReservationRequestsProto(reservation_resources=reservation_resources, interpreter=interpreter)
         reservation_definition = yarn_protos.ReservationDefinitionProto(reservation_requests=reservation_requests, arrival=arrival, deadline=deadline, reservation_name=reservation_name)
         response = self._submitReservation(queue=queue, reservation_definition=reservation_definition)
@@ -988,7 +1080,7 @@ class YarnRMApplicationClient(YarnFailoverClient):
         if reservation_id:
             if not isinstance(reservation_id, yarn_protos.ReservationIdProto):
                 reservation_id = proto_utils.create_reservationid_proto(id=application_id)
-                
+
         response = self._deleteReservation(reservation_id=reservation_id)
         return True
 
@@ -1010,7 +1102,7 @@ class YarnRMApplicationClient(YarnFailoverClient):
     def get_new_application(self):
         '''
           The interface used by clients to obtain a new ApplicationId for submitting new applications.
-          The ResourceManager responds with a new, monotonically increasing, ApplicationId which is used 
+          The ResourceManager responds with a new, monotonically increasing, ApplicationId which is used
           by the client to submit a new application.
           The ResourceManager also responds with details such  as maximum resource capabilities in the cluster
           as specified in GetNewApplicationResponse.
@@ -1151,16 +1243,31 @@ class YarnRMApplicationClient(YarnFailoverClient):
         else:
             return []
 
-class YarnApplicationMasterClient(YarnClient):
+class YarnApplicationMasterClient(RpcFailoverClient):
     """
       ApplicationMaster<-->ResourceManager
       Yarn Application Master Resource Manager client. Implements the protocol between a live instance of ApplicationMaster
       and the Resource Manager.
       This is used by the ApplicationMaster to register/unregister and to request and obtain recources in the cluster from
-      the resource manager
-      RPC interface needed by the application Master
-      to request resources from the resource manager.
+      the resource manager RPC interface needed by the application Master to request resources from the resource manager.
+      The port to use is defined by the value of yarn.resourcemanager.scheduler.address (AM-RM RPC) for this RM.
     """
+
+    def __init__(self, config, **kwargs):
+        self.config = config
+        # set overwrite arguments
+        for extra_option in kwargs:
+            setattr(self.config, extra_option, kwargs[extra_option])
+
+        services = []
+        for resourcemanager in self.config.resourcemanagers:
+            services.append({'host': resourcemanager['hostname'],'port': resourcemanager['scheduler_port']})
+
+        super(YarnApplicationMasterClient, self).__init__( services=services, version=self.config.version,
+                                                         effective_user=self.config.effective_user, use_sasl=self.config.use_sasl,
+                                                         yarn_rm_principal=self.config.yarn_rm_principal,
+                                                         sock_connect_timeout=self.config.sock_connect_timeout,
+                                                         sock_request_timeout=self.config.sock_request_timeout)
 
     service_protocol = "org.apache.hadoop.yarn.api.ApplicationMasterProtocolPB"
     service_stub = applicationmaster_protocol.ApplicationMasterProtocolService_Stub
@@ -1211,14 +1318,14 @@ class YarnApplicationMasterClient(YarnClient):
         else:
             return False
 
-class YarnContainerManagerClient(YarnClient):
+class YarnContainerManagerClient(RpcClient):
     """
      ApplicationMaster<-->NodeManager
-     Yarn Containers Management Client, implements the protocol between an ApplicationMaster and a NodeManager to 
+     Yarn Containers Management Client, implements the protocol between an ApplicationMaster and a NodeManager to
      start/stop and increase resource of containers and to get status of running containers.
 
      In Yarn the ResourceManager hands off control of assigned NodeManagers to the ApplicationMaster.
-     The ApplicationMaster independently contact its assigned node managers and provide them with a Container Launch Context 
+     The ApplicationMaster independently contact its assigned node managers and provide them with a Container Launch Context
      that includes environment variables, dependencies located in remote storage, security tokens, and commands needed to start the actual process.
 
      If security is enabled the NodeManager verifies that the ApplicationMaster has truly been allocated the container
@@ -1261,7 +1368,7 @@ class YarnContainerManagerClient(YarnClient):
                     container_id = [container_id]
                 else:
                     raise YarnError("container_id need to be a list of Type ContainerIdProto.")
-    
+
         response = self._stopContainers(container_id=container_id)
         if response:
             return json_format.MessageToDict(response)
@@ -1279,7 +1386,7 @@ class YarnContainerManagerClient(YarnClient):
                     container_id = [container_id]
                 else:
                     raise YarnError("container_id need to be a list of Type ContainerIdProto.")
-    
+
         response = self._getContainerStatuses(container_id=container_id)
         if response:
             return json_format.MessageToDict(response)

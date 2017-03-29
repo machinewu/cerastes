@@ -2,7 +2,7 @@
 # encoding: utf-8
 
 import ast
-from cerastes.client import YarnAdminClient, YarnAdminHAClient
+from cerastes.client import YarnConfig, YarnRmanAdminClient, YarnRmanApplicationClient
 from cerastes.errors import YarnError
 from pkg_resources import resource_string
 from functools import wraps
@@ -19,7 +19,7 @@ import json
 
 _logger = lg.getLogger(__name__)
 
-class YarnConfig(object):
+class CerastesConfig(object):
 
   default_path = osp.expanduser('~/.cerastes.cfg')
 
@@ -71,71 +71,22 @@ class YarnConfig(object):
       log_handler.setLevel(level)
       return log_handler
 
-  def parse_common_arguments(self, cluster, params):
-
-       if 'version' in cluster:
-         params['version'] = cluster['version']
-
-       if 'effective_user' in cluster:
-         params['effective_user'] = cluster['effective_user']
-
-       if 'yarn_rm_principal' in cluster:
-         params['yarn_rm_principal'] = cluster['yarn_rm_principal']
-
-       if 'use_sasl' in cluster:
-         params['use_sasl'] = cluster['use_sasl']
-
-       if 'sock_connect_timeout' in cluster:
-         params['sock_connect_timeout'] = cluster['sock_connect_timeout']
-
-       if 'sock_request_timeout' in cluster:
-         params['sock_request_timeout'] = cluster['sock_request_timeout']
-
-       return params
-
-  def get_rm_admin_client(self, cluster_name, **kwargs):
+  def get_client(self, cluster_name, client_class, **kwargs):
       """
       :param cluster_name: The client to look up. If the cluster name does not
         exist and exception will be raised.
       :param kwargs: additional arguments can be used to overwrite or add some 
         parameters defined in the configuration file.
       """
-      VALID_EXTRA_ARGS = ['resourcemanagers', 'version', 'effective_user', 'use_sasl', 'yarn_rm_principal', 'sock_connect_timeout', 'sock_request_timeout']
-      params = {}
       for cluster in self.config['clusters']:
         if cluster['name'] == cluster_name:
-
-            params = self.parse_common_arguments(cluster,params)
-
-            if 'resourcemanagers' in kwargs:
-              resourcemanagers = kwargs['resourcemanagers']
-              del kwargs['resourcemanagers']
-            elif 'resourcemanagers' in cluster:
-              resourcemanagers = cluster['resourcemanagers']
-            else:
-              raise YarnError("resourcemanagers configuration missing")
-
-            if len(resourcemanagers) > 1:
-                services = []
-                # The cluster is in HA
-                for service in resourcemanagers:
-                  services.extend([{'host': service['hostname'], 'port': service['administration_port']}])
-                params['services'] = services
-                client_class = YarnAdminHAClient
-            elif len(resourcemanagers) == 1:
-                params['host'] = resourcemanagers[0]['hostname']
-                params['port'] = resourcemanagers[0]['administration_port']
-                client_class = YarnAdminClient
-            else:
-                raise YarnError("resourcemanagers configuration seems wrong")
-
-            # set overwrite arguments            
-            for extra_option in kwargs:
-              if extra_option not in VALID_EXTRA_ARGS:
-                raise YarnError("invalid configuration option %s" % extra_option)
-              params[extra_option] = kwargs[extra_option]
-
-            return client_class(**params)
+            return client_class( YarnConfig(**cluster), **kwargs)
 
       # the name does not exist
       raise YarnError('Cluster %s is not defined in configuration file.' % cluster_name)
+
+  def get_rmadmin_client(self, cluster_name, **kwargs):
+      return self.get_client(cluster_name, YarnRmanAdminClient, **kwargs)
+
+  def get_rmapp_client(self, cluster_name, **kwargs):
+      return self.get_client(cluster_name, YarnRmanApplicationClient, **kwargs)

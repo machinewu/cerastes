@@ -47,7 +47,7 @@ from cerastes.protobuf.RpcHeader_pb2 import RpcRequestHeaderProto, RpcResponseHe
 from cerastes.protobuf.IpcConnectionContext_pb2 import IpcConnectionContextProto
 from cerastes.protobuf.ProtobufRpcEngine_pb2 import RequestHeaderProto
 
-from cerastes.errors import RpcError, RpcAuthenticationError, MalformedRpcRequestError, RpcSaslError, RpcBufferError 
+from cerastes.errors import RpcError, RpcConnectionError, RpcAuthenticationError, MalformedRpcRequestError, RpcSaslError, RpcBufferError 
 
 # Module imports
 
@@ -232,7 +232,10 @@ class SocketRpcChannel(RpcChannel):
         self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         self.sock.settimeout(self.sock_connect_timeout / 1000)
         # Connect socket to server - defined by host and port arguments
-        self.sock.connect((host, port))
+        try:
+            self.sock.connect((host, port))
+        except socket.error as e:
+            raise RpcConnectionError("Unable to connect to rpc service : %s" % str(e)) 
         self.sock.settimeout(self.sock_request_timeout / 1000)
 
         # Send RPC headers

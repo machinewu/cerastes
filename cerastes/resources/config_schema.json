@@ -37,6 +37,12 @@
                 "application_port": {
                   "type": "integer"
                 },
+                "resourcetracker_port": {
+                  "type": "integer"
+                },
+                "scheduler_port": {
+                  "type": "integer"
+                },
                 "hostname": {
                   "type": "string"
                 }

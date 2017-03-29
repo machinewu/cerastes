@@ -47,6 +47,10 @@ class RpcError(Exception):
            self.message = ' '.join([self.message, line])
     super(RpcError, self).__init__(self.message)
 
+class RpcConnectionError(RpcError):
+  def __init__(self, message, *args):
+    super(RpcConnectionError, self).__init__("", message % args if args else message)
+
 class RpcAuthenticationError(RpcError):
   def __init__(self, message, *args):
     super(RpcAuthenticationError, self).__init__("", message % args if args else message)
