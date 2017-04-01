@@ -27,6 +27,7 @@ from abc import ABCMeta, abstractmethod
 from enum import Enum, IntEnum
 from datetime import datetime
 
+import json
 import re
 import logging as lg
 
@@ -120,6 +121,27 @@ class _RpcHandler(object):
                 raise YarnError(str(e))
 
     return rpc_handler
+
+def _rpc_formatter(rpc_func):
+    def _rpc_wrapper(*args, **kwargs):
+
+          if "output_format" in kwargs:
+             output_format = kwargs["output_format"]
+             del kwargs["output_format"]
+          else:
+             output_format = "raw"
+
+          response = rpc_func(*args, **kwargs)
+          if response:
+            if output_format == "raw":
+                return response
+            elif output_format == "dict":
+                return json_format.MessageToDict(response, including_default_value_fields=True)
+            elif output_format == "json":
+                return json_format.MessageToJson(response, including_default_value_fields=True)
+            else:
+                return response
+    return _rpc_wrapper
 
 # Thanks Matt for the nice piece of code
 # inherit ABCMeta to make YarnClient abstract
@@ -261,55 +283,54 @@ class RpcRmanAdminClient(RpcClient):
     _removeFromClusterNodeLabels = _RpcHandler( service_stub, service_protocol )
     _replaceLabelsOnNodes = _RpcHandler( service_stub, service_protocol )
 
+    @_rpc_formatter
     def refresh_service_acls(self):
-        response = self._refreshServiceAcls()
-        return True
+        return self._refreshServiceAcls()
 
+    @_rpc_formatter
     def refresh_admin_acls(self):
-        response = self._refreshAdminAcls()
-        return True
+        return self._refreshAdminAcls()
 
+    @_rpc_formatter
     def refresh_nodes(self):
-        response = self._refreshNodes()
-        return True
+        return self._refreshNodes()
 
+    @_rpc_formatter
     def refresh_queues(self):
-        response = self._refreshQueues()
-        return True
+        return self._refreshQueues()
 
+    @_rpc_formatter
     def refresh_super_user_groups_configuration(self):
-        response = self._refreshSuperUserGroupsConfiguration()
-        return True
+        return self._refreshSuperUserGroupsConfiguration()
 
+    @_rpc_formatter
     def refresh_user_to_groups_mappings(self):
         response = self._refreshUserToGroupsMappings()
-        return True
 
+    @_rpc_formatter
     def update_node_resource(self, node_resource_map):
         #TODO
         return False
 
+    @_rpc_formatter
     def add_to_cluster_node_labels(self, nodeLabels):
         if not isinstance(nodeLabels, list):
            raise YarnError("Add To Cluster Node Labels expect array of strings argument")
 
-        response = self._addToClusterNodeLabels(nodeLabels=nodeLabels)
-        return True
+        return self._addToClusterNodeLabels(nodeLabels=nodeLabels)
 
+    @_rpc_formatter
     def remove_from_cluster_node_labels(self, labels):
         response = self._removeFromClusterNodeLabels(nodeLabels=labels)
-        return True
 
+    @_rpc_formatter
     def replace_labels_on_nodes(self, nodeToLabels):
         #TODO
-        return False
+        raise YarnError("Not Implemented yet !")
 
+    @_rpc_formatter
     def get_groups_for_user(self, user):
-        response = self._getGroupsForUser(user=user)
-        if response:
-            return [ group for group in response.groups ]
-        else:
-            return []
+        return self._getGroupsForUser(user=user)
 
 class RpcHAClient(RpcClient):
 
@@ -326,33 +347,30 @@ class RpcHAClient(RpcClient):
         REQUEST_BY_USER_FORCED = ha_protocol.REQUEST_BY_USER_FORCED
         REQUEST_BY_ZKFC = ha_protocol.REQUEST_BY_ZKFC
 
+    @_rpc_formatter
     def get_service_status(self):
-        response = self._getServiceStatus()
-        if response:
-            return json_format.MessageToDict(response)
-        else:
-            return []
+        return self._getServiceStatus()
 
+    @_rpc_formatter
     def monitor_health(self):
        # raise an error if there is something wrong
        response = self._monitorHealth()
-       return True
 
+    @_rpc_formatter
     def transition_to_standby(self, source):
        if not isinstance(source, self.REQUEST_SOURCE):
            raise YarnError("scope need to be REQUEST_SOURCE type.")
 
        reqInfo = ha_protocol.HAStateChangeRequestInfoProto(reqSource=source)
-       response = self._transitionToStandby(reqInfo=reqInfo)
-       return True
+       return self._transitionToStandby(reqInfo=reqInfo)
 
+    @_rpc_formatter
     def transition_to_active(self, source):
        if not isinstance(source, self.REQUEST_SOURCE):
            raise YarnError("scope need to be REQUEST_SOURCE type.")
 
        reqInfo = ha_protocol.HAStateChangeRequestInfoProto(reqSource=source)
-       response = self._transitionToActive(reqInfo=reqInfo)
-       return True
+       return self._transitionToActive(reqInfo=reqInfo)
 
 class YarnRmanAdminClient(RpcRmanAdminClient):
     """
@@ -360,7 +378,12 @@ class YarnRmanAdminClient(RpcRmanAdminClient):
     """
 
     class AdminHaServices(object):
-        
+
+        class HA_SERVICE_STATE(IntEnum):
+            ACTIVE = ha_protocol.ACTIVE
+            STANDBY = ha_protocol.STANDBY
+            INITIALIZING = ha_protocol.INITIALIZING
+ 
         def __init__(self, config):
             self.services_map = []
             for resourcemanager in config.resourcemanagers:
@@ -381,7 +404,7 @@ class YarnRmanAdminClient(RpcRmanAdminClient):
         def get_active_rm_service(self):
             if len(self.services_map) > 1:
                 for svr in self.services_map:
-                    if svr['ha_client'].get_service_status()['state'] == "ACTIVE":
+                    if svr['ha_client'].get_service_status().state == self.HA_SERVICE_STATE.ACTIVE:
                         return svr
                 raise YarnError("Could not find any active RM server.")
             elif len(self.services_map) == 1:
@@ -392,7 +415,7 @@ class YarnRmanAdminClient(RpcRmanAdminClient):
         def get_standby_rm_service(self):
             if len(self.services_map) > 1:
                 for svr in self.services_map:
-                    if svr['ha_client'].get_service_status()['state'] == "STANDBY":
+                    if svr['ha_client'].get_service_status().state == self.HA_SERVICE_STATE.STANDBY:
                         return svr
                 raise YarnError("Could not find any active RM server.")
             else:
@@ -449,7 +472,6 @@ class YarnRmanAdminClient(RpcRmanAdminClient):
            state = YarnHARMClient.REQUEST_SOURCE.REQUEST_BY_USER
         ha_active_client.transition_to_standby(state)
         ha_sb_client.transition_to_active(state)
-        return True
 
     def _call(self, executor, controller, request):
         active_client = self.get_active_rm_client()
@@ -479,17 +501,21 @@ class MrAdminClient(RpcClient):
     _refreshJobRetentionSettings = _RpcHandler( service_stub, service_protocol )
     _refreshLogRetentionSettings = _RpcHandler( service_stub, service_protocol )
 
+    @_rpc_formatter
     def refresh_log_retention_settings(self):
-        response = self._refreshLogRetentionSettings()
+        return self._refreshLogRetentionSettings()
 
+    @_rpc_formatter
     def refresh_job_retention_settings(self):
-        response = self._refreshJobRetentionSettings()
+        return self._refreshJobRetentionSettings()
 
+    @_rpc_formatter
     def refresh_admin_acls(self):
-        response = self._refreshAdminAcls()
+        return self._refreshAdminAcls()
 
+    @_rpc_formatter
     def refresh_loaded_job_cache(self):
-        response = self._refreshLoadedJobCache()
+        return self._refreshLoadedJobCache()
 
 class MrClient(RpcClient):
     """
@@ -529,66 +555,56 @@ class MrClient(RpcClient):
 
     ''' Kill Functions '''
 
+    @_rpc_formatter
     def fail_task_attempt(self, attempt_id, task_id=None):
         task_attempt = proto_utils.create_task_attempt_id_proto(attempt_id=attempt_id, task_id=task_id)
-        response = self._failTaskAttempt(task_attempt_id=task_attempt)
+        return self._failTaskAttempt(task_attempt_id=task_attempt)
 
+    @_rpc_formatter
     def kill_task_attempt(self, attempt_id, task_id=None):
         task_attempt = proto_utils.create_task_attempt_id_proto(attempt_id=attempt_id, task_id=task_id)
-        response = self._killTaskAttempt(task_attempt_id=task_attempt)
+        return self._killTaskAttempt(task_attempt_id=task_attempt)
 
+    @_rpc_formatter
     def kill_job(self, job_id, app_id=None):
         job = proto_utils.create_jobid_proto(job_id=job_id,app_id=app_id)
-        response = self._killJob(job_id=job)
+        return self._killJob(job_id=job)
 
+    @_rpc_formatter
     def kill_task(self, task_id, job_id=None, task_type=None):
         task = proto_utils.create_taskid_proto(task_id=task_id, task_type=task_type, job_id=job_id)
-        response = self._killTask(task_id=task)
+        return self._killTask(task_id=task)
 
     ''' Diagnostics Functions '''
 
+    @_rpc_formatter
     def get_diagnostics(self, attempt_id, task_id=None):
         task_attempt = proto_utils.create_task_attempt_id_proto(attempt_id=attempt_id, task_id=task_id)
-        response = self._getDiagnostics(task_attempt_id=task_attempt)
-        if response:
-            return [ json_format.MessageToDict(diagnostic) for diagnostic in response.diagnostics ]
-        else:
-            return []
+        return self._getDiagnostics(task_attempt_id=task_attempt)
 
+    @_rpc_formatter
     def get_task_attempt_completion_events(self, job_id, from_event_id=None, max_events=None):
         if job_id:
             if not isinstance(job_id, mr_protos.JobIdProto):
                 raise YarnError("job_id need to be of type JobIdProto.")
-        response = self._getTaskAttemptCompletionEvents(job_id=job_id, from_event_id=from_event_id, max_events=max_events)
-        if response:
-            return json_format.MessageToDict(response)
-        else:
-            return {}
+        return self._getTaskAttemptCompletionEvents(job_id=job_id, from_event_id=from_event_id, max_events=max_events)
 
+    @_rpc_formatter
     def get_counters(self, job_id, app_id=None):
         job = proto_utils.create_jobid_proto(job_id=job_id,app_id=app_id)
-        response = self._getCounters(job_id=job)
-        if response:
-            return json_format.MessageToDict(response)
-        else:
-            return {}
+        return self._getCounters(job_id=job)
 
+    @_rpc_formatter
     def get_job_report(self, job_id=None, app_id=None):
         job = proto_utils.create_jobid_proto(job_id=job_id,app_id=app_id)
-        response = self._getJobReport(job_id=job)
-        if response:
-            return json_format.MessageToDict(response)
-        else:
-            return {}
+        return self._getJobReport(job_id=job)
 
+    @_rpc_formatter
     def get_task_report(self, task_id, job_id=None, task_type=None):
         task = proto_utils.create_taskid_proto(task_id=task_id, task_type=task_type, job_id=job_id)
-        response = self._getTaskReport(task_id=task)
-        if response:
-            return json_format.MessageToDict(response)
-        else:
-            return {}
+        return self._getTaskReport(task_id=task)
 
+    @_rpc_formatter
     def get_task_reports(self, job_id, task_type=None):
         if job_id:
             if not isinstance(job_id, mr_protos.JobIdProto):
@@ -596,43 +612,30 @@ class MrClient(RpcClient):
         if task_type:
             if not isinstance(task_type, proto_utils.TASKTYPE):
                 raise YarnError("task_type need to be of type TASKTYPE.")
-        response = self._getTaskReports(job_id=job_id, task_type=task_type)
-        if response:
-            return [ json_format.MessageToDict(report) for report in response.task_reports ]
-        else:
-            return []
+        return self._getTaskReports(job_id=job_id, task_type=task_type)
 
+    @_rpc_formatter
     def get_task_attempt_report(self, attempt_id, task_id=None):
         task_attempt = proto_utils.create_task_attempt_id_proto(attempt_id=attempt_id, task_id=task_id)
-        response = self._getTaskAttemptReport(task_attempt_id=task_attempt)
-        if response:
-            return json_format.MessageToDict(response)
-        else:
-            return {}
+        return self._getTaskAttemptReport(task_attempt_id=task_attempt)
 
     ''' Token Functions '''
 
+    @_rpc_formatter
     def get_delegation_token(self, renewer=None):
-        response = self._getDelegationToken(renewer=renewer)
-        if response:
-            return json_format.MessageToDict(response)
-        else:
-            return {}
+        return self._getDelegationToken(renewer=renewer)
 
+    @_rpc_formatter
     def renew_delegation_token(self, token):
         if not isinstance(token, security_protocol.TokenProto):
             raise YarnError("token need to be of type TokenProto.")
-        response = self._renewDelegationToken(token=token)
-        if response:
-            return json_format.MessageToDict(response)
-        else:
-            return {}
+        return self._renewDelegationToken(token=token)
 
+    @_rpc_formatter
     def cancel_delegation_token(self, token):
         if not isinstance(token, security_protocol.TokenProto):
             raise YarnError("token need to be of type TokenProto.")
-        response = self._cancelDelegationToken(token=token)
-        return True
+        return self._cancelDelegationToken(token=token)
 
 class YarnHistoryServerClient(RpcClient):
     """
@@ -668,14 +671,12 @@ class YarnHistoryServerClient(RpcClient):
 
     ''' Application Functions '''
 
+    @_rpc_formatter
     def get_application_report(self, application_id, cluster_timestamp=None):
         application = yarn_protos.ApplicationIdProto(id=application_id, cluster_timestamp=cluster_timestamp)
-        response = self._getApplicationReport(application_id=application)
-        if response:
-            return json_format.MessageToDict(response)
-        else:
-            return {}
+        return self._getApplicationReport(application_id=application)
 
+    @_rpc_formatter
     def get_applications(self, application_types=None, application_states=None, users=None,
                          queues=None, limit=None, start_begin=None, start_end=None,
                          finish_begin=None, finish_end=None, applicationTags=None, scope=None):
@@ -742,75 +743,53 @@ class YarnHistoryServerClient(RpcClient):
                 else:
                     raise YarnError("scope need to be a list of Enum APPLICATION_SCOPE.")
 
-        response = self._getApplications( application_types=application_types, application_states=application_states,
-                                          users=users,queues=queues, limit=limit, start_begin=start_begin, start_end=start_end,
-                                          finish_begin=finish_begin, finish_end=finish_end, applicationTags=applicationTags, scope=scope)
-        if response:
-            return [ json_format.MessageToDict(application) for application in response.applications ]
-        else:
-            return []
+        return self._getApplications( application_types=application_types, application_states=application_states,
+                                      users=users,queues=queues, limit=limit, start_begin=start_begin, start_end=start_end,
+                                      finish_begin=finish_begin, finish_end=finish_end, applicationTags=applicationTags, scope=scope)
 
     ''' Application Attempts Functions '''
 
+    @_rpc_formatter
     def get_application_attempt_report(self, application_id=None, attemptId=None):
         application_attempt = proto_utils.create_application_attempt_id_proto(application_id=application_id, attemptId=attemptId)
-        response = self._getApplicationAttemptReport(application_attempt_id=application_attempt)
-        if response:
-            return json_format.MessageToDict(response.application_attempt_report)
-        else:
-            return {}
+        return self._getApplicationAttemptReport(application_attempt_id=application_attempt)
 
+    @_rpc_formatter
     def get_application_attempts(self, application_id):
         if application_id:
             if not isinstance(application_id, yarn_protos.ApplicationIdProto):
                 application_id = proto_utils.create_applicationid_proto(id=application_id)
-        response = self._getApplicationAttempts(application_id=application_id)
-        if response:
-            return [ json_format.MessageToDict(attempt) for attempt in response.application_attempts ]
-        else:
-            return []
+        return self._getApplicationAttempts(application_id=application_id)
 
     ''' Container Functions '''
 
+    @_rpc_formatter
     def get_container_report(self, app_id, app_attempt_id, container_id):
         containerid = proto_utils.create_containerid_proto(app_id=app_id, app_attempt_id=app_attempt_id, container_id=container_id)
-        response = self._getContainerReport(container_id=containerid)
-        if response:
-            return json_format.MessageToDict(response.container_report)
-        else:
-            return {}
+        return self._getContainerReport(container_id=containerid)
 
+    @_rpc_formatter
     def get_containers(self, application_id=None, attemptId=None ):
         application_attempt = proto_utils.create_application_attempt_id_proto(application_id=application_id, attemptId=attemptId)
-        response = self._getContainers(application_attempt_id=application_attempt)
-        if response:
-            return [ json_format.MessageToDict(container) for container in response.containers ]
-        else:
-            return []
+        return self._getContainers(application_attempt_id=application_attempt)
 
     ''' Token Functions '''
 
+    @_rpc_formatter
     def get_delegation_token(self, renewer=None):
-        response = self._getDelegationToken(renewer=renewer)
-        if response:
-            return json_format.MessageToDict(response)
-        else:
-            return {}
+        return self._getDelegationToken(renewer=renewer)
 
+    @_rpc_formatter
     def renew_delegation_token(self, token):
         if not isinstance(token, security_protocol.TokenProto):
             raise YarnError("token need to be of type TokenProto.")
-        response = self._renewDelegationToken(token=token)
-        if response:
-            return json_format.MessageToDict(response)
-        else:
-            return {}
+        return self._renewDelegationToken(token=token)
 
+    @_rpc_formatter
     def cancel_delegation_token(self, token):
         if not isinstance(token, security_protocol.TokenProto):
             raise YarnError("token need to be of type TokenProto.")
-        response = self._cancelDelegationToken(token=token)
-        return True
+        return self._cancelDelegationToken(token=token)
 
 class YarnRmanApplicationClient(RpcFailoverClient):
     """
@@ -866,6 +845,7 @@ class YarnRmanApplicationClient(RpcFailoverClient):
     _deleteReservation = _RpcHandler( service_stub, service_protocol )
 
 
+    @_rpc_formatter
     def submit_application(self, application_id, application_name=None, queue =None,
                            priority=None, am_container_spec=None, cancel_tokens_when_complete=True,
                            unmanaged_am=False, maxAppAttempts=0, resource=None, applicationType="YARN",
@@ -933,31 +913,25 @@ class YarnRmanApplicationClient(RpcFailoverClient):
                                                                             log_aggregation_context=log_aggregation_context, reservation_id=reservation_id,
                                                                             node_label_expression=node_label_expression,
                                                                             am_container_resource_request=am_container_resource_request)
-        response = self._submitApplication(application_submission_context=submission_context)
-        return True
+        return self._submitApplication(application_submission_context=submission_context)
 
+    @_rpc_formatter
     def get_delegation_token(self, renewer=None):
-        response = self._getDelegationToken(renewer=renewer)
-        if response:
-            return json_format.MessageToDict(response)
-        else:
-            return {}
+        return self._getDelegationToken(renewer=renewer)
 
+    @_rpc_formatter
     def renew_delegation_token(self, token):
         if not isinstance(token, security_protocol.TokenProto):
             raise YarnError("token need to be of type TokenProto.")
-        response = self._renewDelegationToken(token=token)
-        if response:
-            return json_format.MessageToDict(response)
-        else:
-            return {}
+        return self._renewDelegationToken(token=token)
 
+    @_rpc_formatter
     def cancel_delegation_token(self, token):
         if not isinstance(token, security_protocol.TokenProto):
             raise YarnError("token need to be of type TokenProto.")
-        response = self._cancelDelegationToken(token=token)
-        return True
+        return self._cancelDelegationToken(token=token)
 
+    @_rpc_formatter
     def move_application_across_queues(self, application_id, target_queue):
         '''
            Move an application to a new queue.
@@ -968,43 +942,31 @@ class YarnRmanApplicationClient(RpcFailoverClient):
 
         if not isinstance(application_id, yarn_protos.ApplicationIdProto):
             application_id = proto_utils.create_applicationid_proto(id=application_id)
-        response = self._moveApplicationAcrossQueues(application_id=application_id, target_queue=target_queue)
-        return True
+        return self._moveApplicationAcrossQueues(application_id=application_id, target_queue=target_queue)
 
+    @_rpc_formatter
     def get_application_attempt_report(self, application_id=None, attemptId=None):
         application_attempt = proto_utils.create_application_attempt_id_proto(application_id=application_id, attemptId=attemptId)
-        response = self._getApplicationAttemptReport(application_attempt_id=application_attempt)
-        if response:
-            return json_format.MessageToDict(response.application_attempt_report)
-        else:
-            return {}
+        return self._getApplicationAttemptReport(application_attempt_id=application_attempt)
 
+    @_rpc_formatter
     def get_application_attempts(self, application_id):
         if application_id:
             if not isinstance(application_id, yarn_protos.ApplicationIdProto):
                 application_id = proto_utils.create_applicationid_proto(id=application_id)
-        response = self._getApplicationAttempts(application_id=application_id)
-        if response:
-            return [ json_format.MessageToDict(attempt) for attempt in response.application_attempts ]
-        else:
-            return []
+        return self._getApplicationAttempts(application_id=application_id)
 
+    @_rpc_formatter
     def get_container_report(self, app_id, app_attempt_id, container_id):
         containerid = proto_utils.create_containerid_proto(app_id=app_id, app_attempt_id=app_attempt_id, container_id=container_id)
-        response = self._getContainerReport(container_id=containerid)
-        if response:
-            return json_format.MessageToDict(response.container_report)
-        else:
-            return {}
+        return self._getContainerReport(container_id=containerid)
 
+    @_rpc_formatter
     def get_containers(self, application_id=None, attemptId=None ):
         application_attempt = proto_utils.create_application_attempt_id_proto(application_id=application_id, attemptId=attemptId)
-        response = self._getContainers(application_attempt_id=application_attempt)
-        if response:
-            return [ json_format.MessageToDict(container) for container in response.containers ]
-        else:
-            return []
+        return self._getContainers(application_attempt_id=application_attempt)
 
+    @_rpc_formatter
     def submit_reservation(self, reservation_resources=None, arrival=None, deadline=None, reservation_name=None, queue=None, interpreter=None):
         '''
           The interface used by clients to submit a new reservation to the ResourceManager.
@@ -1048,13 +1010,9 @@ class YarnRmanApplicationClient(RpcFailoverClient):
         reservation_requests = yarn_protos.ReservationRequestsProto(reservation_resources=reservation_resources, interpreter=interpreter)
         reservation_definition = yarn_protos.ReservationDefinitionProto(reservation_requests=reservation_requests, arrival=arrival, deadline=deadline, reservation_name=reservation_name)
 
-        response = self._submitReservation(queue=queue, reservation_definition=reservation_definition)
+        return self._submitReservation(queue=queue, reservation_definition=reservation_definition)
 
-        if response:
-            return json_format.MessageToDict(response.reservation_id)
-        else:
-            return {}
-
+    @_rpc_formatter
     def update_reservation(self, reservation_id, reservation_resources=None, arrival=None, deadline=None, reservation_name=None, interpreter=None):
         if reservation_id:
             if not isinstance(reservation_id, yarn_protos.ReservationIdProto):
@@ -1077,32 +1035,29 @@ class YarnRmanApplicationClient(RpcFailoverClient):
 
         reservation_requests = yarn_protos.ReservationRequestsProto(reservation_resources=reservation_resources, interpreter=interpreter)
         reservation_definition = yarn_protos.ReservationDefinitionProto(reservation_requests=reservation_requests, arrival=arrival, deadline=deadline, reservation_name=reservation_name)
-        response = self._submitReservation(queue=queue, reservation_definition=reservation_definition)
-        return True
+        return self._submitReservation(queue=queue, reservation_definition=reservation_definition)
 
+    @_rpc_formatter
     def delete_reservation(self, reservation_id):
         if reservation_id:
             if not isinstance(reservation_id, yarn_protos.ReservationIdProto):
                 reservation_id = proto_utils.create_reservationid_proto(id=application_id)
 
-        response = self._deleteReservation(reservation_id=reservation_id)
-        return True
+        return self._deleteReservation(reservation_id=reservation_id)
 
+    @_rpc_formatter
     def force_kill_application(self, application_id):
         if application_id:
             if not isinstance(application_id, yarn_protos.ApplicationIdProto):
                 application_id = proto_utils.create_applicationid_proto(id=application_id)
-        response = self._forceKillApplication(application_id=application_id)
-        return True
+        return self._forceKillApplication(application_id=application_id)
 
+    @_rpc_formatter
     def get_application_report(self, application_id, cluster_timestamp):
         application = yarn_protos.ApplicationIdProto(id=application_id, cluster_timestamp=cluster_timestamp)
-        response = self._getApplicationReport(application_id=application)
-        if response:
-            return json_format.MessageToDict(response)
-        else:
-            return {}
+        return self._getApplicationReport(application_id=application)
 
+    @_rpc_formatter
     def get_new_application(self):
         '''
           The interface used by clients to obtain a new ApplicationId for submitting new applications.
@@ -1113,20 +1068,13 @@ class YarnRmanApplicationClient(RpcFailoverClient):
 
           @return: response containing the new <code>ApplicationId</code> to be used to submit an application.
         '''
-        response = self._getNewApplication()
-        if response:
-            return response
-            #return json_format.MessageToDict(response)
-        else:
-            return {}
+        return self._getNewApplication()
 
+    @_rpc_formatter
     def get_cluster_metrics(self):
-        response = self._getClusterMetrics()
-        if response:
-            return json_format.MessageToDict(response.cluster_metrics)
-        else:
-            return {}
+        return self._getClusterMetrics()
 
+    @_rpc_formatter
     def get_cluster_nodes(self, node_states=None):
         if node_states:
             if type(node_states) in (tuple, list):
@@ -1139,41 +1087,26 @@ class YarnRmanApplicationClient(RpcFailoverClient):
                 else:
                     raise YarnError("node_states need to be a list of Enum NODE_STATES.")
 
-        response = self._getClusterNodes(nodeStates=node_states)
-        if response:
-            return json_format.MessageToDict(response.nodeReports)
-        else:
-            return {}
+        return self._getClusterNodes(nodeStates=node_states)
 
+    @_rpc_formatter
     def get_node_to_labels(self):
-        response = self._getNodeToLabels()
-        if response:
-            return [ json_format.MessageToDict(label) for label in response.nodeToLabels ]
-        else:
-            return []
+        return self._getNodeToLabels()
 
+    @_rpc_formatter
     def get_cluster_node_labels(self):
-        response = self._getClusterNodeLabels()
-        if response:
-            return [ json_format.MessageToDict(label) for label in response.nodeLabels ]
-        else:
-            return []
+        return self._getClusterNodeLabels()
 
+    @_rpc_formatter
     def get_queue_info(self, queue_name, include_applications=False, include_child_queues=False, recursive=False):
-        response = self._getQueueInfo( queueName=queue_name, includeApplications=include_applications,
-                                       includeChildQueues=include_child_queues, recursive=recursive)
-        if response:
-            return json_format.MessageToDict(response.queueInfo)
-        else:
-            return {}
+        return self._getQueueInfo( queueName=queue_name, includeApplications=include_applications,
+                                   includeChildQueues=include_child_queues, recursive=recursive)
 
+    @_rpc_formatter
     def get_queue_user_acls(self):
-        response = self._getQueueUserAcls()
-        if response:
-            return json_format.MessageToDict(response.queueUserAcls)
-        else:
-            return {}
+        return self._getQueueUserAcls()
 
+    @_rpc_formatter
     def get_applications(self, application_types=None, application_states=None, users=None,
                          queues=None, limit=None, start_begin=None, start_end=None,
                          finish_begin=None, finish_end=None, applicationTags=None, scope=None):
@@ -1240,13 +1173,9 @@ class YarnRmanApplicationClient(RpcFailoverClient):
                 else:
                     raise YarnError("scope need to be a list of Enum APPLICATION_SCOPE.")
 
-        response = self._getApplications( application_types=application_types, application_states=application_states,
-                                          users=users,queues=queues, limit=limit, start_begin=start_begin, start_end=start_end,
-                                          finish_begin=finish_begin, finish_end=finish_end, applicationTags=applicationTags, scope=scope)
-        if response:
-            return [ json_format.MessageToDict(application) for application in response.applications ]
-        else:
-            return []
+        return self._getApplications( application_types=application_types, application_states=application_states,
+                                      users=users,queues=queues, limit=limit, start_begin=start_begin, start_end=start_end,
+                                      finish_begin=finish_begin, finish_end=finish_end, applicationTags=applicationTags, scope=scope)
 
 class YarnApplicationMasterClient(RpcFailoverClient):
     """
@@ -1281,16 +1210,14 @@ class YarnApplicationMasterClient(RpcFailoverClient):
     _finishApplicationMaster = _RpcHandler( service_stub, service_protocol )
     _allocate = _RpcHandler( service_stub, service_protocol )
 
+    @_rpc_formatter
     def register_application_master(self, host=None, rpc_port=None, tracking_url=None):
         '''
             The application master register itself with the resource manager once started.
         '''
         response = self._registerApplicationMaster(host=host, rpc_port=rpc_port, tracking_url=tracking_url)
-        if response:
-            return json_format.MessageToDict(response)
-        else:
-            return {}
 
+    @_rpc_formatter
     def finish_application_master(self, diagnostics, tracking_url, final_application_status):
         '''
             The application master finish its execution.
@@ -1298,12 +1225,9 @@ class YarnApplicationMasterClient(RpcFailoverClient):
         if final_application_status:
             if not isinstance(final_application_status, proto_utils.FINAL_APPLICATION_STATUS):
                 raise YarnError("final_application_status need to be of type FINAL_APPLICATION_STATUS.")
-        response = self._finishApplicationMaster(diagnostics=diagnostics, tracking_url=tracking_url, final_application_status=final_application_status)
-        if response:
-            return json_format.MessageToDict(response.isUnregistered)
-        else:
-            return False
+        return self._finishApplicationMaster(diagnostics=diagnostics, tracking_url=tracking_url, final_application_status=final_application_status)
 
+    @_rpc_formatter
     def allocate(self, ask, release, blacklist_request, response_id, progress, increase_request):
         if ask:
             if not isinstance(ask, yarn_protos.ResourceRequestProto):
@@ -1317,11 +1241,7 @@ class YarnApplicationMasterClient(RpcFailoverClient):
         if increase_request:
             if not isinstance(increase_request, yarn_protos.ContainerResourceIncreaseRequestProto):
                 raise YarnError("increase_request need to be of type ContainerResourceIncreaseRequestProto.")
-        response = self._allocate(ask=ask, release=release, blacklist_request=blacklist_request, response_id=response_id, progress=progress, increase_request=increase_request)
-        if response:
-            return json_format.MessageToDict(response)
-        else:
-            return False
+        return self._allocate(ask=ask, release=release, blacklist_request=blacklist_request, response_id=response_id, progress=progress, increase_request=increase_request)
 
 class YarnContainerManagerClient(RpcClient):
     """
@@ -1344,6 +1264,7 @@ class YarnContainerManagerClient(RpcClient):
     _stopContainers = _RpcHandler( service_stub, service_protocol )
     _getContainerStatuses = _RpcHandler( service_stub, service_protocol )
 
+    @_rpc_formatter
     def start_containers(self, start_container_request):
         if start_container_request:
             if type(start_container_request) in (tuple, list):
@@ -1356,12 +1277,9 @@ class YarnContainerManagerClient(RpcClient):
                 else:
                     raise YarnError("start_container_request need to be a list of Type StartContainerRequestProto.")
 
-        response = self._startContainers(start_container_request=start_container_request)
-        if response:
-            return json_format.MessageToDict(response)
-        else:
-            return {}
+        return self._startContainers(start_container_request=start_container_request)
 
+    @_rpc_formatter
     def stop_containers(self,container_id):
         if container_id:
             if type(container_id) in (tuple, list):
@@ -1374,12 +1292,9 @@ class YarnContainerManagerClient(RpcClient):
                 else:
                     raise YarnError("container_id need to be a list of Type ContainerIdProto.")
 
-        response = self._stopContainers(container_id=container_id)
-        if response:
-            return json_format.MessageToDict(response)
-        else:
-            return {}
+        return self._stopContainers(container_id=container_id)
 
+    @_rpc_formatter
     def get_container_statuses(self,container_id):
         if container_id:
             if type(container_id) in (tuple, list):
@@ -1392,8 +1307,4 @@ class YarnContainerManagerClient(RpcClient):
                 else:
                     raise YarnError("container_id need to be a list of Type ContainerIdProto.")
 
-        response = self._getContainerStatuses(container_id=container_id)
-        if response:
-            return json_format.MessageToDict(response)
-        else:
-            return {}
+        return self._getContainerStatuses(container_id=container_id)
