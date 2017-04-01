@@ -221,10 +221,14 @@ class RpcFailoverClient(RpcClient):
           try:
             response =  executor(self.service, controller, request)
             return response
-          except RpcError:
-              self.switch_active_service()
-              attempt += 1
-              pass
+          except RpcError as e:
+              # Standby error can come in the form of a connection refused
+              if "StandbyException" in " ".join([e.class_name, e.message]) or "Connection refused" in " ".join([e.class_name, e.message]):
+                  self.switch_active_service()
+                  attempt += 1
+                  pass
+              else:
+                  raise e
           except:
                 raise
 
@@ -666,7 +670,7 @@ class YarnHistoryServerClient(RpcClient):
 
     def get_application_report(self, application_id, cluster_timestamp=None):
         application = yarn_protos.ApplicationIdProto(id=application_id, cluster_timestamp=cluster_timestamp)
-        response = self._getApplicationReport(application)
+        response = self._getApplicationReport(application_id=application)
         if response:
             return json_format.MessageToDict(response)
         else:
@@ -1091,9 +1095,9 @@ class YarnRmanApplicationClient(RpcFailoverClient):
         response = self._forceKillApplication(application_id=application_id)
         return True
 
-    def get_application_report(self, application_id, cluster_timestamp=None):
+    def get_application_report(self, application_id, cluster_timestamp):
         application = yarn_protos.ApplicationIdProto(id=application_id, cluster_timestamp=cluster_timestamp)
-        response = self._getApplicationReport(application)
+        response = self._getApplicationReport(application_id=application)
         if response:
             return json_format.MessageToDict(response)
         else:
@@ -1111,7 +1115,8 @@ class YarnRmanApplicationClient(RpcFailoverClient):
         '''
         response = self._getNewApplication()
         if response:
-            return json_format.MessageToDict(response)
+            return response
+            #return json_format.MessageToDict(response)
         else:
             return {}
 
