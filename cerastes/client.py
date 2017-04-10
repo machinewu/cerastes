@@ -1035,7 +1035,7 @@ class YarnRmanApplicationClient(RpcFailoverClient):
 
         reservation_requests = yarn_protos.ReservationRequestsProto(reservation_resources=reservation_resources, interpreter=interpreter)
         reservation_definition = yarn_protos.ReservationDefinitionProto(reservation_requests=reservation_requests, arrival=arrival, deadline=deadline, reservation_name=reservation_name)
-        return self._updateReservation(queue=queue, reservation_definition=reservation_definition)
+        return self._updateReservation(reservation_id=reservation_id, reservation_definition=reservation_definition)
 
     @_rpc_formatter
     def delete_reservation(self, reservation_id):
