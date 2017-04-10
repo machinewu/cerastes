@@ -241,7 +241,7 @@ def create_containerid_proto(app_id, app_attempt_id, container_id):
             app_attempt_id = create_application_attempt_id_proto(application_id=app_id, attemptId=app_attempt_id)
     return  yarn_protos.ContainerIdProto(app_id=app_id, app_attempt_id=app_attempt_id, id=container_id)
 
-def create_start_container_request(container_launch_context,container_token):
+def create_start_container_request(container_launch_context, container_token=None):
         if container_launch_context:
             if not isinstance(container_launch_context, yarn_protos.ContainerLaunchContextProto):
                 raise YarnError("container_launch_context need to be of type ContainerLaunchContextProto.")
