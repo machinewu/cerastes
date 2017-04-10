@@ -467,9 +467,9 @@ class YarnRmanAdminClient(RpcRmanAdminClient):
         ha_sb_client = self.rm_services.get_standby_rm_service()['ha_client']
         ha_active_client = self.rm_services.get_active_rm_service()['ha_client']
         if force:
-           state = YarnHARMClient.REQUEST_SOURCE.REQUEST_BY_USER_FORCED
+           state = self.AdminHaServices.REQUEST_SOURCE.REQUEST_BY_USER_FORCED
         else:
-           state = YarnHARMClient.REQUEST_SOURCE.REQUEST_BY_USER
+           state = self.AdminHaServices.REQUEST_SOURCE.REQUEST_BY_USER
         ha_active_client.transition_to_standby(state)
         ha_sb_client.transition_to_active(state)
 
@@ -1016,7 +1016,7 @@ class YarnRmanApplicationClient(RpcFailoverClient):
     def update_reservation(self, reservation_id, reservation_resources=None, arrival=None, deadline=None, reservation_name=None, interpreter=None):
         if reservation_id:
             if not isinstance(reservation_id, yarn_protos.ReservationIdProto):
-                reservation_id = proto_utils.create_reservationid_proto(id=application_id)
+                reservation_id = proto_utils.create_reservationid_proto(id=reservation_id)
 
         if reservation_resources:
             if type(reservation_resources) in (tuple, list):
@@ -1035,13 +1035,13 @@ class YarnRmanApplicationClient(RpcFailoverClient):
 
         reservation_requests = yarn_protos.ReservationRequestsProto(reservation_resources=reservation_resources, interpreter=interpreter)
         reservation_definition = yarn_protos.ReservationDefinitionProto(reservation_requests=reservation_requests, arrival=arrival, deadline=deadline, reservation_name=reservation_name)
-        return self._submitReservation(queue=queue, reservation_definition=reservation_definition)
+        return self._updateReservation(queue=queue, reservation_definition=reservation_definition)
 
     @_rpc_formatter
     def delete_reservation(self, reservation_id):
         if reservation_id:
             if not isinstance(reservation_id, yarn_protos.ReservationIdProto):
-                reservation_id = proto_utils.create_reservationid_proto(id=application_id)
+                reservation_id = proto_utils.create_reservationid_proto(id=reservation_id)
 
         return self._deleteReservation(reservation_id=reservation_id)
 
@@ -1218,7 +1218,7 @@ class YarnApplicationMasterClient(RpcFailoverClient):
         response = self._registerApplicationMaster(host=host, rpc_port=rpc_port, tracking_url=tracking_url)
 
     @_rpc_formatter
-    def finish_application_master(self, diagnostics, tracking_url, final_application_status):
+    def finish_application_master(self, diagnostics=None, tracking_url=None, final_application_status=None):
         '''
             The application master finish its execution.
         '''
@@ -1228,20 +1228,48 @@ class YarnApplicationMasterClient(RpcFailoverClient):
         return self._finishApplicationMaster(diagnostics=diagnostics, tracking_url=tracking_url, final_application_status=final_application_status)
 
     @_rpc_formatter
-    def allocate(self, ask, release, blacklist_request, response_id, progress, increase_request):
-        if ask:
-            if not isinstance(ask, yarn_protos.ResourceRequestProto):
-                raise YarnError("ask need to be of type ResourceRequestProto.")
+    def allocate(self, asks=None, releases=None, blacklist_request=None, response_id=None, progress=None, increase_requests=None):
+        if asks:
+            if type(asks) in (tuple, list):
+                for ask in asks:
+                    if not isinstance(ask, yarn_protos.ResourceRequestProto):
+                        raise YarnError("asks need to be a list of ResourceRequestProto.")
+            else:
+                if isinstance(asks, yarn_protos.ResourceRequestProto):
+                    asks = [asks]
+                else:
+                    raise YarnError("asks need to be a list of Type ResourceRequestProto.")
+
+        if releases:
+            if type(releases) in (tuple, list):
+                for release in releases:
+                    if not isinstance(release, yarn_protos.ContainerIdProto):
+                        raise YarnError("releases need to be a list of ContainerIdProto.")
+            else:
+                if isinstance(releases, yarn_protos.ContainerIdProto):
+                    releases = [releases]
+                else:
+                    raise YarnError("releases need to be a list of Type ContainerIdProto.")
+                                
         if release:
             if not isinstance(release, yarn_protos.ContainerIdProto):
                 raise YarnError("release need to be of type ContainerIdProto.")
         if blacklist_request:
             if not isinstance(blacklist_request, yarn_protos.ResourceBlacklistRequestProto):
                 raise YarnError("blacklist_request need to be of type ResourceBlacklistRequestProto.")
-        if increase_request:
-            if not isinstance(increase_request, yarn_protos.ContainerResourceIncreaseRequestProto):
-                raise YarnError("increase_request need to be of type ContainerResourceIncreaseRequestProto.")
-        return self._allocate(ask=ask, release=release, blacklist_request=blacklist_request, response_id=response_id, progress=progress, increase_request=increase_request)
+    
+        if increase_requests:
+            if type(increase_requests) in (tuple, list):
+                for request in increase_requests:
+                    if not isinstance(request, yarn_protos.ContainerResourceIncreaseRequestProto):
+                        raise YarnError("increase_requests need to be a list of ContainerResourceIncreaseRequestProto.")
+            else:
+                if isinstance(increase_requests, yarn_protos.ContainerResourceIncreaseRequestProto):
+                    increase_requests = [increase_requests]
+                else:
+                    raise YarnError("increase_requests need to be a list of Type ContainerResourceIncreaseRequestProto.")
+        
+        return self._allocate(ask=asks, release=releases, blacklist_request=blacklist_request, response_id=response_id, progress=progress, increase_request=increase_requests)
 
 class YarnContainerManagerClient(RpcClient):
     """
