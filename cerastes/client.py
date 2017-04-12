@@ -655,8 +655,8 @@ class YarnHistoryServerClient(RpcClient):
                                                        sock_connect_timeout=self.config.sock_connect_timeout,
                                                        sock_request_timeout=self.config.sock_request_timeout) 
 
-    #service_protocol = "org.apache.hadoop.yarn.api.ApplicationHistoryProtocolPB"
-    service_protocol = "org.apache.hadoop.yarn.api.ApplicationHistoryProtocol"
+    service_protocol = "org.apache.hadoop.yarn.api.ApplicationHistoryProtocolPB"
+    #service_protocol = "org.apache.hadoop.yarn.api.ApplicationHistoryProtocol"
     service_stub = application_history_client_protocol.ApplicationHistoryProtocolService_Stub
 
     _getApplicationReport = _RpcHandler( service_stub, service_protocol )
