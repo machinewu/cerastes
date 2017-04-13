@@ -100,12 +100,15 @@ def create_task_attempt_id_proto(attempt_id, task_id=None):
 
     return  mr_protos.TaskAttemptIdProto(id=attempt_id, task_id=task_id)
 
+def create_url_proto( scheme=None, host=None, port=None, file=None, userInfo=None):
+    return yarn_protos.URLProto(scheme=scheme, host=host, port=port, file=resource_file, userInfo=userInfo )
+
 def create_local_resource_proto( key=None, scheme=None, 
                                  host=None, port=None, resource_file=None,
                                  userInfo=None, size=None, timestamp=None,
                                  recource_type=None, visibility=None, pattern=None):
 
-    resource = yarn_protos.LocalResourceProto(scheme=scheme, host=host, port=port, file=resource_file, userInfo=userInfo)
+    resource = yarn_protos.URLProto(scheme=scheme, host=host, port=port, file=resource_file, userInfo=userInfo)
     if recource_type:
         if not isinstance(recource_type, LOCAL_RESOURCE_TYPE):
             raise YarnError("recource_type need to be of type LOCAL_RESOURCE_TYPE.")

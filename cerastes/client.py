@@ -1251,9 +1251,6 @@ class YarnApplicationMasterClient(RpcFailoverClient):
                 else:
                     raise YarnError("releases need to be a list of Type ContainerIdProto.")
                                 
-        if release:
-            if not isinstance(release, yarn_protos.ContainerIdProto):
-                raise YarnError("release need to be of type ContainerIdProto.")
         if blacklist_request:
             if not isinstance(blacklist_request, yarn_protos.ResourceBlacklistRequestProto):
                 raise YarnError("blacklist_request need to be of type ResourceBlacklistRequestProto.")
