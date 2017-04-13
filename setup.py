@@ -51,10 +51,11 @@ setup(
   install_requires=[
     'docopt',
     'protobuf>2.4.1',
-    'jsonschema>2.0',
+    'jsonschema>=2.0',
     'python-krbV',
     'sasl',
     'six',
+    'enum34'
   ],
   entry_points={'console_scripts': 
      [ 'cerastes = cerastes.cmdtool:main' ]
